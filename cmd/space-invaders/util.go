@@ -124,7 +124,6 @@ func parsePostgresURL(databaseUrl string) (string, error) {
 		"user":     "postgres",
 		"password": "pass",
 		"sslmode":  "disable",
-		"timezone": "Europe/Berlin",
 	}
 
 	// Parse the database URL
