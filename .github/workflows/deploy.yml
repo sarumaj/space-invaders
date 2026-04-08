@@ -50,6 +50,10 @@ jobs:
           golangci-lint run -v --timeout 5m && \
           go test -v -race ./...
 
+      - name: Install Heroku CLI
+        run: |
+          curl https://cli-assets.heroku.com/install.sh | sh
+
       - name: Get app url
         uses: akhileshns/heroku-deploy@v3.14.15
         with:
