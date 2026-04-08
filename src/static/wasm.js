@@ -34,7 +34,7 @@ async function loadWasm() {
     // Load and instantiate the WebAssembly module
     const wasmModule = await WebAssembly.instantiateStreaming(
       fetch("main.wasm"),
-      go.importObject
+      go.importObject,
     );
 
     // Change overlay text to "Running..."
@@ -97,11 +97,11 @@ if ("serviceWorker" in navigator) {
     (registration) => {
       console.log(
         "ServiceWorker registration successful with scope: ",
-        registration.scope
+        registration.scope,
       );
     },
     (error) => {
       console.log("ServiceWorker registration failed: ", error);
-    }
+    },
   );
 }

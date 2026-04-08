@@ -53,15 +53,15 @@ fi
 
 # Download the Go runtime for WebAssembly
 log_message "Retrieving the Go runtime for WebAssembly"
-if [ -f "$(go env GOROOT)/misc/wasm/wasm_exec.js" ]; then
-	cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" "$TARGET_DIR/wasm_exec.js"
+if [ -f "$(go env GOROOT)/lib/wasm/wasm_exec.js" ]; then
+	cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$TARGET_DIR/wasm_exec.js"
 	log_message "Go runtime copied successfully"
 else
 	curl \
 		--retry 3 \
 		--retry-all-errors \
 		--retry-delay 5 \
-		-sL https://raw.githubusercontent.com/golang/go/master/misc/wasm/wasm_exec.js \
+		-sL https://raw.githubusercontent.com/golang/go/master/lib/wasm/wasm_exec.js \
 		-o "$TARGET_DIR/wasm_exec.js"
 	log_message "Go runtime downloaded successfully"
 fi

@@ -29,7 +29,7 @@ self.addEventListener("install", (event) => {
       })
       .catch((error) => {
         console.error("Failed to pre-cache assets:", error);
-      })
+      }),
   );
 });
 
@@ -69,7 +69,7 @@ self.addEventListener("fetch", (event) => {
             .catch((error) => {
               console.error(
                 "Network request failed, returning cached response:",
-                error
+                error,
               );
               return cachedResponse; // Return cached response if network fails
             });
@@ -90,7 +90,7 @@ self.addEventListener("fetch", (event) => {
               statusText: "Service Unavailable",
             });
           });
-      })
+      }),
     );
   } else {
     event.respondWith(
@@ -103,7 +103,7 @@ self.addEventListener("fetch", (event) => {
             statusText: "Service Unavailable",
             headers: { "Content-Type": "application/json" },
           });
-        })
+        }),
     );
   }
 });
