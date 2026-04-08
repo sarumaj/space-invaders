@@ -65,7 +65,7 @@ jobs:
       - name: Export app config
         id: export_app_config
         run: |
-          DATABASE_URL="$(heroku config:get SCHEMATOGO_URL --app="${{ secrets.HEROKU_APP_NAME }}")?sslmode=require"
+          DATABASE_URL="$(heroku config:get HEROKU_POSTGRESQL_JADE_URL --app="${{ secrets.HEROKU_APP_NAME }}")?sslmode=require"
           HEROKU_APP_URL=$(heroku apps:info --app="${{ secrets.HEROKU_APP_NAME }}" --json | jq -r '.app.web_url | rtrimstr("/")')
 
           cat <<EOF >> "$GITHUB_OUTPUT"
