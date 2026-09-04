@@ -1,4 +1,4 @@
-// Code generated on 2026-04-08T14:19:44.394Z+00:00, DO NOT EDIT.
+// Code generated on 2026-09-04T19:44:46.3NZ:z, DO NOT EDIT.
 package dist
 
 import (
@@ -110,7 +110,7 @@ func (h *httpFS) Open(name string) (http.File, error) {
 	return nil, fs.ErrNotExist
 }
 
-func BuildTime() string { return "2026-04-08T14:19:44.394Z+00:00" }
+func BuildTime() string { return "2026-09-04T19:44:46.3NZ:z" }
 
 func LookupHash(name string) (string, bool) {
 	hash, ok := hashMap[name]

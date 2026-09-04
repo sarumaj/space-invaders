@@ -7,6 +7,19 @@ import (
 
 type Stars []Star
 
+// Twinkling reports whether any star still has to be painted.
+// The starfield never moves, so once every star has been exhausted the
+// offscreen canvas already holds the finished image and can simply be reused.
+func (stars Stars) Twinkling() bool {
+	for i := range stars {
+		if !stars[i].Exhausted {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Explode is a function that creates a number of stars.
 // It creates a grid of cells and places stars in random positions within these cells.
 // The number of stars is determined by the input parameter.

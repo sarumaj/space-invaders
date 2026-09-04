@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"syscall/js"
@@ -23,10 +24,21 @@ func AddEventListenerToCanvas(event string, listener any) {
 }
 
 // CanvasBoundingBox returns the bounding box of the document.
+// getBoundingClientRect forces the browser to flush pending layout, and the
+// result is read once per enemy, bullet and input event, so it is cached until
+// invalidateCanvasBoundingBox reports that the canvas may have moved.
 func CanvasBoundingBox() dimensions {
+	canvasBoxMutex.RLock()
+	dim, valid := canvasBox, canvasBoxValid
+	canvasBoxMutex.RUnlock()
+
+	if valid {
+		return dim
+	}
+
 	box := canvasObject.Call("getBoundingClientRect")
 
-	dim := dimensions{
+	dim = dimensions{
 		BoxLeft:        box.Get("left").Float(),
 		BoxTop:         box.Get("top").Float(),
 		BoxRight:       box.Get("right").Float(),
@@ -40,7 +52,19 @@ func CanvasBoundingBox() dimensions {
 	dim.ScaleWidth = dim.BoxWidth / dim.OriginalWidth
 	dim.ScaleHeight = dim.BoxHeight / dim.OriginalHeight
 
+	canvasBoxMutex.Lock()
+	canvasBox, canvasBoxValid = dim, true
+	canvasBoxMutex.Unlock()
+
 	return dim
+}
+
+// invalidateCanvasBoundingBox discards the cached canvas geometry so that the
+// next CanvasBoundingBox call measures the document again.
+func invalidateCanvasBoundingBox() {
+	canvasBoxMutex.Lock()
+	canvasBoxValid = false
+	canvasBoxMutex.Unlock()
 }
 
 // ClearBackground is a function that clears the invisible document.
@@ -157,14 +181,10 @@ func GlobalSet(key string, value any) {
 // IsPlaying is a function that returns true if the audio track is playing.
 func IsPlaying(name string) bool {
 	audioPlayersMutex.RLock()
+	defer audioPlayersMutex.RUnlock()
+
 	player, playerOk := audioPlayers[name]
-	audioPlayersMutex.RUnlock()
-
-	if playerOk && player.source.Truthy() {
-		return true
-	}
-
-	return false
+	return playerOk && player.source.Truthy()
 }
 
 // IsTouchDevice is a function that returns true if the device is a touch device.
@@ -239,91 +259,208 @@ func NewInstance(typ string, args ...any) js.Value {
 	return GlobalGet(typ).New(args...)
 }
 
-// PlayAudio is a function that plays an audio track.
-func PlayAudio(name string, loop bool) {
+// ensureAudioContext lazily (re)creates the audio context and reports whether
+// it can be used.
+func ensureAudioContext() bool {
+	if audioCtx.Truthy() {
+		return true
+	}
+
+	audioCtx = getAudioContext()
+	if !audioCtx.Truthy() {
+		LogError(fmt.Errorf("failed to initialize audio context"))
+		return false
+	}
+
+	return true
+}
+
+// audioBuffer resolves the decoded AudioBuffer of the named track and hands it
+// to onReady, or hands it js.Null if the track could not be made available.
+// A track is fetched and decoded at most once for the lifetime of the page:
+// decoding is orders of magnitude more expensive than starting a buffer source,
+// and requests arriving while a decode is in flight are queued rather than
+// starting a decode of their own.
+func audioBuffer(name string, onReady func(buffer js.Value)) {
+	if !ensureAudioContext() {
+		onReady(js.Null())
+		return
+	}
+
+	audioTracksMutex.Lock()
+	track, trackOk := audioTracks[name]
+	if !trackOk {
+		track = &audioTrack{}
+		audioTracks[name] = track
+	}
+
+	if track.buffer.Truthy() {
+		buffer := track.buffer
+		audioTracksMutex.Unlock()
+		onReady(buffer)
+		return
+	}
+
+	track.waiting = append(track.waiting, onReady)
+	if track.loading {
+		audioTracksMutex.Unlock()
+		return
+	}
+
+	track.loading = true
+	audioTracksMutex.Unlock()
+
+	go func() {
+		raw, err := LoadAudio(name)
+		if err != nil {
+			LogError(fmt.Errorf("failed to load audio track %s: %w", name, err))
+			settleAudioTrack(track, js.Null())
+			return
+		}
+
+		buffer := NewInstance("Uint8Array", len(raw))
+		js.CopyBytesToJS(buffer, raw)
+
+		// decodeAudioData detaches the underlying ArrayBuffer, so the copy above
+		// cannot be reused - which is fine, it is made once per track.
+		var then, catch js.Func
+		then = js.FuncOf(func(_ js.Value, p []js.Value) any {
+			then.Release()
+			catch.Release()
+			settleAudioTrack(track, p[0])
+			return nil
+		})
+		catch = js.FuncOf(func(_ js.Value, p []js.Value) any {
+			then.Release()
+			catch.Release()
+			LogError(fmt.Errorf("failed to decode audio track %s: %s\n%s",
+				name, p[0].Get("message").String(), p[0].Get("stack").String()))
+			settleAudioTrack(track, js.Null())
+			return nil
+		})
+
+		audioCtx.Call("decodeAudioData", buffer.Get("buffer")).Call("then", then).Call("catch", catch)
+	}()
+}
+
+// settleAudioTrack publishes the outcome of a decode and drains the callbacks
+// that queued behind it. Failures are reported too, so that callers waiting on
+// the track do not stay blocked forever.
+func settleAudioTrack(track *audioTrack, buffer js.Value) {
+	audioTracksMutex.Lock()
+	track.loading = false
+	if buffer.Truthy() {
+		track.buffer = buffer
+	}
+	waiting := track.waiting
+	track.waiting = nil
+	audioTracksMutex.Unlock()
+
+	for _, onReady := range waiting {
+		onReady(buffer)
+	}
+}
+
+// preloadAudio fetches and decodes every shipped audio track in the background,
+// so that the frame which first triggers a sound does not pay for it.
+func preloadAudio() {
 	if !*Config.Control.AudioEnabled {
 		return
 	}
 
-	// Reinitialize the audio context if it is not initialized
-	if !audioCtx.Truthy() {
-		audioCtx = getAudioContext()
-		if !audioCtx.Truthy() {
-			LogError(fmt.Errorf("failed to initialize audio context"))
-			return
-		}
+	for _, name := range audioTrackNames {
+		audioBuffer(name, func(js.Value) {})
+	}
+}
+
+// PlayAudio is a function that plays an audio track.
+func PlayAudio(name string, loop bool) {
+	if !*Config.Control.AudioEnabled || !ensureAudioContext() {
+		return
 	}
 
-	audioPlayersMutex.RLock()
+	audioPlayersMutex.Lock()
 	player, playerOk := audioPlayers[name]
-	audioPlayersMutex.RUnlock()
+	if !playerOk {
+		player = &audioPlayer{source: js.Null()}
+		audioPlayers[name] = player
+	}
 
-	if playerOk && player.source.Truthy() {
+	// A track is never layered over itself; a request arriving while the
+	// previous one still plays (or is waiting for its buffer) is dropped.
+	if busy := player.source.Truthy() || player.starting; busy {
+		audioPlayersMutex.Unlock()
+
 		if Config.Control.Debug.Get() {
 			Log(fmt.Sprintf("Audio source already playing: %s", name))
 		}
 		return
 	}
 
-	audioTracksMutex.RLock()
-	track, trackOk := audioTracks[name]
-	audioTracksMutex.RUnlock()
-	if !trackOk {
-		raw, err := LoadAudio(name)
-		if err != nil {
-			LogError(err)
-			return
-		}
+	player.loop, player.starting = loop, true
+	audioPlayersMutex.Unlock()
 
-		audioTracksMutex.Lock()
-		audioTracks[name], track = raw, raw
-		audioTracksMutex.Unlock()
+	// Resolves immediately once the track has been decoded, which after the
+	// initial preload is every time.
+	audioBuffer(name, func(buffer js.Value) { startAudioSource(name, player, buffer) })
+}
+
+// startAudioSource wires a decoded buffer up to the destination and starts it.
+// Creating a buffer source is cheap, so one is made per playback and dropped
+// afterwards, as the Web Audio API requires.
+func startAudioSource(name string, player *audioPlayer, buffer js.Value) {
+	audioPlayersMutex.Lock()
+	defer audioPlayersMutex.Unlock()
+
+	// StopAudio may have cancelled the playback while the buffer was decoding.
+	if !player.starting {
+		return
+	}
+	player.starting = false
+
+	if !buffer.Truthy() || player.source.Truthy() {
+		return
 	}
 
-	buffer := NewInstance("Uint8Array", len(track))
-	js.CopyBytesToJS(buffer, track)
+	// Browsers hand out a suspended context until the first user gesture.
+	// Resuming a running context is a no-op.
+	if audioCtx.Get("state").String() == "suspended" {
+		audioCtx.Call("resume")
+	}
 
-	audioBufferPromise := audioCtx.Call("decodeAudioData", buffer.Get("buffer"))
-	then := js.FuncOf(func(_ js.Value, p []js.Value) any {
-		player.source = audioCtx.Call("createBufferSource")
-		player.source.Set("buffer", p[0])
-		player.source.Call("connect", audioCtx.Get("destination"))
+	source := audioCtx.Call("createBufferSource")
+	source.Set("buffer", buffer)
+	// Let the Web Audio API repeat the track: restarting it from the ended
+	// callback leaves an audible gap and crosses into Go on every repetition.
+	source.Set("loop", player.loop)
+	source.Call("connect", audioCtx.Get("destination"))
 
+	if !player.endedCallback.Truthy() {
 		player.endedCallback = js.FuncOf(func(_ js.Value, _ []js.Value) any {
 			audioPlayersMutex.Lock()
-			audioPlayers[name] = audioPlayer{
-				endedCallback: player.endedCallback,
-				source:        js.Null(),
-				startTime:     0,
-			}
+			player.source = js.Null()
+			player.offset = 0
 			audioPlayersMutex.Unlock()
-
-			if loop {
-				defer PlayAudio(name, loop)
-			}
 
 			return nil
 		})
-		player.source.Call("addEventListener", "ended", player.endedCallback)
+	}
+	source.Call("addEventListener", "ended", player.endedCallback)
 
-		audioPlayersMutex.Lock()
-		audioPlayers[name] = player
-		audioPlayersMutex.Unlock()
+	// Resume where StopAudio left off, wrapping around for looped tracks.
+	offset := player.offset
+	if duration := buffer.Get("duration").Float(); duration > 0 {
+		offset = math.Mod(offset, duration)
+	}
 
-		if Config.Control.Debug.Get() {
-			Log(fmt.Sprintf("Playing audio source: %s", name))
-		}
+	player.source = source
+	player.startedAt = audioCtx.Get("currentTime").Float() - offset
 
-		player.source.Call("start", js.ValueOf(0), js.ValueOf(player.startTime))
-		return nil
-	})
-	catch := js.FuncOf(func(_ js.Value, p []js.Value) any {
-		message := p[0].Get("message").String()
-		stack := p[0].Get("stack").String()
-		LogError(fmt.Errorf("failed to decode audio data: %s\n%s\n", message, stack))
-		return nil
-	})
-	audioBufferPromise.Call("then", then).Call("catch", catch)
+	if Config.Control.Debug.Get() {
+		Log(fmt.Sprintf("Playing audio source: %s", name))
+	}
+
+	source.Call("start", 0, offset)
 }
 
 // SaveScores is a function that saves the score board persistently.
@@ -431,6 +568,7 @@ func Setenv(key, value string) {
 	environ := GlobalGet(goEnv)
 	environ.Set(key, value)
 	GlobalSet(goEnv, environ)
+	invalidateEnvCache()
 }
 
 // SetScore is a function that sets the score.
@@ -479,42 +617,38 @@ func SetScore(name string, newScore int) (rank int) {
 
 // StopAudio is a function that stops an audio track.
 func StopAudio(name string) {
-	audioPlayersMutex.RLock()
+	audioPlayersMutex.Lock()
+	defer audioPlayersMutex.Unlock()
+
 	player, playerOk := audioPlayers[name]
-	audioPlayersMutex.RUnlock()
-
-	// Recursive function to stop the audio source.
-	// Recursion might be necessary if the audio source is still playing
-	// when the stop function is called
-	// and the event listener is at end of the audio source
-	// fires after the audio source has been stopped
-	var stop func(recursive int)
-	stop = func(recursive int) {
-		if playerOk && player.source.Truthy() {
-			if Config.Control.Debug.Get() {
-				Log(fmt.Sprintf("Stopping audio source: %s", name))
-			}
-
-			player.startTime = audioCtx.Get("currentTime").Float()
-
-			player.source.Call("removeEventListener", "ended", player.endedCallback)
-			player.source.Call("stop")
-			player.source = js.Null()
-
-			audioPlayersMutex.Lock()
-			audioPlayers[name] = player
-			audioPlayersMutex.Unlock()
-		}
-
-		// Stop the audio source if it is still playing
-		// and the recursive limit has not been reached
-		if IsPlaying(name) && recursive > 0 {
-			stop(recursive - 1)
-		}
+	if !playerOk {
+		return
 	}
 
-	// Stop the audio source (recursive limit: 10)
-	stop(10)
+	// Cancel a playback that is still waiting for its buffer, so that it does
+	// not start after the caller asked for silence.
+	player.starting = false
+
+	if !player.source.Truthy() {
+		return
+	}
+
+	if Config.Control.Debug.Get() {
+		Log(fmt.Sprintf("Stopping audio source: %s", name))
+	}
+
+	// Remember how far into the track playback got, so that a later PlayAudio
+	// resumes rather than restarts. The offset has to be relative to the start
+	// of the source: audioCtx.currentTime is measured from the creation of the
+	// context, and passing it straight to start() silenced the track as soon as
+	// the context had been alive longer than the track lasts.
+	player.offset = audioCtx.Get("currentTime").Float() - player.startedAt
+
+	// The listener is removed first so that the pending "ended" event of the
+	// stopped source cannot clear the state of a playback started after it.
+	player.source.Call("removeEventListener", "ended", player.endedCallback)
+	player.source.Call("stop")
+	player.source = js.Null()
 }
 
 // StopAudioSources is a function that stops all audio sources that match the selector.
@@ -523,7 +657,7 @@ func StopAudioSources(selector func(name string) bool) {
 
 	var stopped []string
 	for name, player := range audioPlayers {
-		if selector(name) && player.source.Truthy() {
+		if selector(name) && (player.source.Truthy() || player.starting) {
 			stopped = append(stopped, name)
 		}
 	}
@@ -551,6 +685,7 @@ func Unsetenv(key string) {
 	environ := GlobalGet(goEnv)
 	environ.Delete(key)
 	GlobalSet(goEnv, environ)
+	invalidateEnvCache()
 }
 
 // UpdateFPS is a function that updates the frames per second.

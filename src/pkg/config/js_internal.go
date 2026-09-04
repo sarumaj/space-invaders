@@ -41,10 +41,13 @@ const (
 
 var (
 	audioCtx               = getAudioContext()
-	audioPlayers           = make(map[string]audioPlayer)
+	audioPlayers           = make(map[string]*audioPlayer)
 	audioPlayersMutex      = sync.RWMutex{}
-	audioTracks            = make(map[string][]byte)
+	audioTracks            = make(map[string]*audioTrack)
 	audioTracksMutex       = sync.RWMutex{}
+	canvasBox              dimensions
+	canvasBoxValid         bool
+	canvasBoxMutex         = sync.RWMutex{}
 	canvasObject           = document.Call("getElementById", canvasId)
 	canvasObjectContext    = canvasObject.Call("getContext", "2d", MakeObject(map[string]any{"willReadFrequently": true}))
 	console                = GlobalGet("console")
@@ -65,11 +68,41 @@ var (
 	windowLocation         = window.Get("location")
 )
 
+// audioTrackNames lists every audio file shipped with the game, so that all of
+// them can be fetched and decoded before the first frame that needs them.
+var audioTrackNames = []string{
+	"enemy_destroyed.wav",
+	"enemy_hit.wav",
+	"spaceship_acceleration.wav",
+	"spaceship_boost.wav",
+	"spaceship_cannon_fire.wav",
+	"spaceship_crash.wav",
+	"spaceship_deceleration.wav",
+	"spaceship_freeze.wav",
+	"spaceship_whoosh.wav",
+	"theme_heroic.wav",
+}
+
 // audioPlayer represents an audio player.
+// It is held by pointer and mutated under audioPlayersMutex: playback is driven
+// from game goroutines and from JS event callbacks at the same time, so a value
+// copy would let the two lose each other's updates.
 type audioPlayer struct {
-	endedCallback js.Func
-	source        js.Value
-	startTime     float64
+	endedCallback js.Func  // allocated on first playback and reused, since js.Func registrations are only freed by Release
+	source        js.Value // currently playing AudioBufferSourceNode, js.Null when idle
+	loop          bool     // whether the track repeats
+	offset        float64  // position within the track to resume from, in seconds
+	startedAt     float64  // audioCtx.currentTime that corresponds to offset 0 of the current source
+	starting      bool     // a playback is queued behind a pending decode
+}
+
+// audioTrack caches the decoded PCM data of an audio file.
+// decodeAudioData dominates the cost of playing a sound, so it must run once per
+// file rather than once per playback.
+type audioTrack struct {
+	buffer  js.Value         // decoded AudioBuffer, Truthy once the decode succeeded
+	waiting []func(js.Value) // callbacks queued while a decode is in flight
+	loading bool             // a fetch and decode is currently in flight
 }
 
 // dimensions represents the dimensions of the document.
@@ -110,6 +143,9 @@ func init() {
 	setupRefreshInterface()
 	setupScoreBoard()
 
+	// Warm the decoded audio cache before the game starts
+	preloadAudio()
+
 	// Detach the watchdogs
 	envCallback(1)
 }
@@ -146,6 +182,7 @@ func envCallback(exponentialBackoff float64) {
 				Log(fmt.Sprintf("Retrieved environment variables: %#v", env))
 			}
 			GlobalSet(goEnv, MakeObject(env))
+			invalidateEnvCache()
 
 			time.AfterFunc(delayInMs, func() {
 				envCallback(exponentialBackoff)
@@ -215,6 +252,7 @@ func setupAudioInterface() {
 			audioIcon.Get("classList").Call("remove", audioIconMutedClass)
 			audioIcon.Get("classList").Call("add", audioIconUnmutedClass)
 
+			preloadAudio()
 			go PlayAudio("theme_heroic.wav", true)
 		} else {
 			audioIcon.Get("classList").Call("remove", audioIconUnmutedClass)
@@ -250,11 +288,25 @@ func setupCanvasInterface() {
 	invisibleCanvas.Set("height", canvasObject.Get("height").Float())
 
 	GlobalSet("resize", js.FuncOf(func(_ js.Value, _ []js.Value) any {
+		invalidateCanvasBoundingBox()
 		if GlobalGet("drawFunc").Truthy() {
 			GlobalGet("drawFunc").Invoke()
 		}
 		return nil
 	}))
+
+	// Resizing, rotating and scrolling are the only things that can move the
+	// canvas, so the cached bounding box stays valid until one of them happens.
+	// The listeners are registered in the capture phase to also catch scrolling
+	// of any ancestor of the canvas.
+	invalidate := js.FuncOf(func(_ js.Value, _ []js.Value) any {
+		invalidateCanvasBoundingBox()
+		return nil
+	})
+	options := MakeObject(map[string]any{"capture": true, "passive": true})
+	for _, event := range [...]string{"resize", "orientationchange", "scroll"} {
+		window.Call("addEventListener", event, invalidate, options)
+	}
 
 	window.Call("addEventListener", "resize", js.FuncOf(func(_ js.Value, _ []js.Value) any {
 		GlobalCall("requestAnimationFrame", GlobalGet("resize"))

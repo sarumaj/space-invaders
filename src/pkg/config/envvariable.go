@@ -4,15 +4,46 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 
 	"encoding/json"
 )
+
+// envCache holds the already parsed environment variables, keyed by the raw
+// declaration of the variable, including its fallback.
+var (
+	envCache      = make(map[string]any)
+	envCacheMutex sync.RWMutex
+)
+
+// invalidateEnvCache drops every parsed environment value. It has to be called
+// whenever the underlying environment changes, which is when it is refreshed
+// from the server and when a variable is set or unset.
+func invalidateEnvCache() {
+	envCacheMutex.Lock()
+	clear(envCache)
+	envCacheMutex.Unlock()
+}
 
 // envVariable represents an environment variable.
 type EnvVariable[T any] string
 
 // Get returns the value of the environment variable.
+//
+// Several variables are read for every object on every frame, and a read costs
+// a lookup in the JS environment object plus a reflection based parse, so the
+// result is memoized until the environment changes.
 func (e EnvVariable[T]) Get() (result T) {
+	envCacheMutex.RLock()
+	cached, cacheOk := envCache[string(e)]
+	envCacheMutex.RUnlock()
+
+	if cacheOk {
+		if value, ok := cached.(T); ok {
+			return value
+		}
+	}
+
 	parse := func(raw string) (result T) {
 		if len(raw) == 0 {
 			return
@@ -57,8 +88,14 @@ func (e EnvVariable[T]) Get() (result T) {
 	key, fallback, _ := strings.Cut(string(e), ":")
 	raw := Getenv(key)
 	if len(raw) == 0 && len(fallback) > 0 {
-		return parse(fallback)
+		raw = fallback
 	}
 
-	return parse(raw)
+	result = parse(raw)
+
+	envCacheMutex.Lock()
+	envCache[string(e)] = result
+	envCacheMutex.Unlock()
+
+	return
 }

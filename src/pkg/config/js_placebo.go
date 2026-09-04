@@ -75,10 +75,14 @@ func PlayAudio(name string, loop bool)                                          
 func SaveScores()                                                                {}
 func SendMessage(msg string, reset, event bool)                                  { log.Println(msg) }
 func SendMessageThrottled(msg string, reset, event bool, cooldown time.Duration) { log.Println(msg) }
-func Setenv(key, value string)                                                   { _ = os.Setenv(key, value) }
 func SetScore(name string, score int) (rank int)                                 { return }
 func StopAudio(name string)                                                      {}
 func StopAudioSources(selector func(name string) bool)                           {}
+
+func Setenv(key, value string) {
+	_ = os.Setenv(key, value)
+	invalidateEnvCache()
+}
 
 func ThrowError(err error) {
 	if err != nil {
@@ -86,6 +90,9 @@ func ThrowError(err error) {
 	}
 }
 
-func Unsetenv(key string) { _ = os.Unsetenv(key) }
+func Unsetenv(key string) {
+	_ = os.Unsetenv(key)
+	invalidateEnvCache()
+}
 
 func UpdateFPS(fps float64) {}

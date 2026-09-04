@@ -541,12 +541,16 @@ func (h *handler) checkCollisions() {
 // It draws the bullets.
 func (h *handler) draw() {
 	config.ClearCanvas()
-	config.ClearBackground()
 
-	// Draw stars on the background
-	for _, s := range h.stars {
-		s.Draw()
-		s.Exhaust()
+	// Draw stars on the background.
+	// The starfield is static, so it is painted into the offscreen canvas once
+	// and blotted from there by DrawBackground on every later frame.
+	if h.stars.Twinkling() {
+		config.ClearBackground()
+		for i := range h.stars {
+			h.stars[i].Draw()
+			h.stars[i].Exhaust()
+		}
 	}
 
 	// Draw background

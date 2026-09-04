@@ -320,7 +320,7 @@ func (cfg *config) sanitize() error {
 
 	var sanitize func(reflect.Value) error
 	sanitize = func(v reflect.Value) error {
-		if v.Kind() == reflect.Ptr {
+		if v.Kind() == reflect.Pointer {
 			v = v.Elem()
 		}
 
