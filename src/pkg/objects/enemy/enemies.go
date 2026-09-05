@@ -59,7 +59,9 @@ func (enemies Enemies) GetHighestProperty(property func(Enemy) numeric.Number) n
 // The enemies are regenerated when the spaceship reaches the bottom of the screen.
 // The new enemies are placed at the highest level of the existing enemies.
 // The new enemies are turned into a goodie and berserk based on the probabilities.
-func (enemies *Enemies) Update(spaceshipPosition numeric.Position) {
+func (enemies *Enemies) Update(spaceshipPosition numeric.Position, scale numeric.Number) {
+	canvasDimensions := config.CanvasBoundingBox()
+
 	highestType := EnemyType(enemies.GetHighestProperty(func(e Enemy) numeric.Number {
 		return numeric.Number(e.kind)
 	}).Int())
@@ -75,8 +77,8 @@ func (enemies *Enemies) Update(spaceshipPosition numeric.Position) {
 			continue
 		}
 
-		enemy.Move(spaceshipPosition)
-		canvasDimensions := config.CanvasBoundingBox()
+		enemy.Move(spaceshipPosition, scale)
+		enemy.FadeFlash(scale)
 		if enemy.Geometry.Position().Y.Float() >= canvasDimensions.OriginalHeight {
 			newEnemy := Challenge(enemy.Name, false)
 			newEnemy.ToProgressLevel(enemy.Level.Progress)

@@ -55,13 +55,21 @@ var (
 	eventLogChannel        = document.Call("getElementById", eventLogChannelID)
 	eventLogChannelBtn     = document.Call("getElementById", eventLogChannelButtonID)
 	fpsDiv                 = document.Call("getElementById", "fps")
+	infoPanel              = document.Call("getElementById", "info")
+	hudCannonsSpan         = document.Call("getElementById", "hudCannons")
+	hudExperienceBar       = document.Call("getElementById", "hudExperience")
+	hudLevelSpan           = document.Call("getElementById", "hudLevel")
+	hudScoreSpan           = document.Call("getElementById", "hudScore")
+	hudShieldPips          = document.Call("getElementById", "hudShield")
 	infoLogChannel         = document.Call("getElementById", infoLogChannelID)
 	infoLogChannelBtn      = document.Call("getElementById", infoLogChannelButtonID)
 	invisibleCanvas        = document.Call("createElement", "canvas")
 	invisibleCtx           = invisibleCanvas.Call("getContext", "2d")
 	invisibleCanvasScrollY = 0.0
 	messageBox             = document.Call("getElementById", messageBoxID)
-	lastLogSentTime        = time.Time{}
+	lastHUD                HUD
+	lastLogSentTime        = make(map[string]time.Time)
+	lastLogSentMutex       = sync.Mutex{}
 	scoreBoard             []score
 	scoreBoardMutex        = sync.RWMutex{}
 	window                 = GlobalGet("window")
@@ -145,6 +153,13 @@ func init() {
 
 	// Warm the decoded audio cache before the game starts
 	preloadAudio()
+
+	// The frame rate is a diagnostic, not something the player needs, so its
+	// whole panel only appears when debugging is switched on. Hiding just the
+	// readout would leave the panel behind as an empty translucent box.
+	if Config.Control.Debug.Get() {
+		infoPanel.Set("hidden", false)
+	}
 
 	// Detach the watchdogs
 	envCallback(1)
@@ -316,6 +331,15 @@ func setupCanvasInterface() {
 	GlobalCall("requestAnimationFrame", GlobalGet("resize"))
 }
 
+// flashEndCallbacks holds one animation-end listener per channel, and
+// flashEndOptions the listener options they are registered with. Both are
+// allocated once by setupMessageBoxInterface, because SendMessage runs on every
+// enemy hit and a js.Func allocated there is never reclaimed.
+var (
+	flashEndCallbacks = map[logEvent]js.Func{}
+	flashEndOptions   js.Value
+)
+
 // setupMessageBoxInterface is a function that sets up the message box interface.
 // The message box is scrollable only if the content inside the #message element can scroll.
 // The touch events are prevented from propagating to the body when the message box is touched.
@@ -340,6 +364,18 @@ func setupMessageBoxInterface() {
 
 		// Scroll to the bottom of the tab content
 		tabContent.Set("scrollTop", tabContent.Get("scrollHeight"))
+	}
+
+	flashEndOptions = MakeObject(map[string]any{"once": true})
+	for _, event := range [...]logEvent{false, true} {
+		flashEndCallbacks[event] = js.FuncOf(func(this js.Value, _ []js.Value) any {
+			this.Get("classList").Call("remove", tabFlashClass)
+			if !event { // If not event log, activate the tab
+				this.Get("classList").Call("add", tabActiveClass)
+				this.Call("click")
+			}
+			return nil
+		})
 	}
 
 	eventLogChannelBtn.Call("addEventListener", "click", js.FuncOf(func(_ js.Value, p []js.Value) any {

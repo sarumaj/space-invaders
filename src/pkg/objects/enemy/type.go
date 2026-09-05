@@ -22,8 +22,54 @@ const (
 	Overlord                     // Overlord is the enemy type that can harm the player's spaceship more than the bulwark enemy
 )
 
+const (
+	Chaser  Behavior = iota // Chaser homes in on the spaceship.
+	Drifter                 // Drifter holds its line and ignores the spaceship.
+	Strafer                 // Strafer sweeps sideways as it descends.
+	Charger                 // Charger commits to the spaceship's column and keeps closing.
+	Lurker                  // Lurker hangs back, edges closer and is hard to see.
+)
+
+// Behavior represents how an enemy type moves.
+type Behavior int
+
 // EnemyType represents the type of the enemy (Normal, Tank, Freezer, Berserker, Annihilator, ...)
 type EnemyType int
+
+// Armed reports whether the enemy type shoots back.
+// The lighter types do not, so that the opening minutes stay about dodging, and
+// the roster escalates into a firefight rather than starting as one.
+func (enemyType EnemyType) Armed() bool {
+	switch enemyType {
+	case Normal, Tank:
+		return false
+
+	default:
+		return true
+	}
+}
+
+// GetBehavior returns the movement behavior of the enemy type.
+func (enemyType EnemyType) GetBehavior() Behavior {
+	b, ok := map[EnemyType]Behavior{
+		Tank:        Drifter,
+		Freezer:     Strafer,
+		Cloaked:     Lurker,
+		Berserker:   Charger,
+		Juggernaut:  Charger,
+		Dreadnought: Strafer,
+		Behemoth:    Drifter,
+		Leviathan:   Strafer,
+		Bulwark:     Drifter,
+		Overlord:    Charger,
+	}[enemyType]
+
+	if !ok {
+		return Chaser
+	}
+
+	return b
+}
 
 // AnyOf returns true if the enemy type is any of the given types.
 func (enemyType EnemyType) AnyOf(types ...EnemyType) bool {
@@ -37,20 +83,23 @@ func (enemyType EnemyType) AnyOf(types ...EnemyType) bool {
 }
 
 // GetColor returns the color of the enemy based on its type.
+// The heavier half of the roster used to be painted in near-black hues, which on
+// a black starfield made the most dangerous enemies the hardest ones to see. The
+// palette below keeps the same associations but at a luminance that reads.
 func (enemyType EnemyType) GetColor() graphics.Color {
 	c, ok := map[EnemyType]graphics.Color{
 		Tank:        graphics.Catalogue().Chartreuse(),
 		Freezer:     graphics.Catalogue().DeepSkyBlue(),
-		Cloaked:     graphics.Catalogue().DarkSlateGray().SetA(0.6),
+		Cloaked:     graphics.Catalogue().SlateGray().SetA(0.7),
 		Berserker:   graphics.Catalogue().Crimson(),
-		Annihilator: graphics.Catalogue().MidnightBlue(),
+		Annihilator: graphics.Catalogue().RoyalBlue(),
 		Juggernaut:  graphics.Catalogue().DarkOrange(),
-		Dreadnought: graphics.Catalogue().DarkRed(),
-		Behemoth:    graphics.Catalogue().DarkGreen(),
-		Colossus:    graphics.Catalogue().DarkBlue(),
-		Leviathan:   graphics.Catalogue().DarkMagenta(),
-		Bulwark:     graphics.Catalogue().DarkCyan(),
-		Overlord:    graphics.Catalogue().DarkGoldenRod(),
+		Dreadnought: graphics.Catalogue().OrangeRed(),
+		Behemoth:    graphics.Catalogue().MediumSeaGreen(),
+		Colossus:    graphics.Catalogue().CornflowerBlue(),
+		Leviathan:   graphics.Catalogue().Orchid(),
+		Bulwark:     graphics.Catalogue().Turquoise(),
+		Overlord:    graphics.Catalogue().Gold(),
 	}[enemyType]
 
 	if !ok {
@@ -58,6 +107,55 @@ func (enemyType EnemyType) GetColor() graphics.Color {
 	}
 
 	return c
+}
+
+// GetBlast returns the destruction animation of the enemy type, chosen to match
+// the hull that is coming apart.
+func (enemyType EnemyType) GetBlast() string {
+	b, ok := map[EnemyType]string{
+		Tank:        config.BlastVaporize,
+		Freezer:     config.BlastShatter,
+		Cloaked:     config.BlastVaporize,
+		Berserker:   config.BlastSpiral,
+		Annihilator: config.BlastImplosion,
+		Juggernaut:  config.BlastShockwave,
+		Dreadnought: config.BlastSpiral,
+		Behemoth:    config.BlastShockwave,
+		Colossus:    config.BlastImplosion,
+		Leviathan:   config.BlastShatter,
+		Bulwark:     config.BlastShockwave,
+		Overlord:    config.BlastShockwave,
+	}[enemyType]
+
+	if !ok {
+		return config.BlastBurst
+	}
+
+	return b
+}
+
+// GetShape returns the hull the enemy type is drawn with.
+func (enemyType EnemyType) GetShape() string {
+	s, ok := map[EnemyType]string{
+		Tank:        config.ShapeChevron,
+		Freezer:     config.ShapePrism,
+		Cloaked:     config.ShapePhantom,
+		Berserker:   config.ShapeSpike,
+		Annihilator: config.ShapeHexpod,
+		Juggernaut:  config.ShapeRam,
+		Dreadnought: config.ShapeDagger,
+		Behemoth:    config.ShapeFortress,
+		Colossus:    config.ShapeSaucer,
+		Leviathan:   config.ShapeTrident,
+		Bulwark:     config.ShapeShield,
+		Overlord:    config.ShapeCrown,
+	}[enemyType]
+
+	if !ok {
+		return config.ShapeArrow
+	}
+
+	return s
 }
 
 // GetDefenseBoost returns the defense boost of the enemy based on its type.

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <meta charset="UTF-8" />
     <meta
       name="viewport"
-      charset="UTF-8"
       content="width=device-width, initial-scale=1.0, user-scalable=no"
     />
     <title>Space Invaders On Assembly Line</title>
@@ -96,8 +96,30 @@
         </button>
       </div>
       <div id="canvasContainer">
-        <div id="info">
-          <div id="fps" data-format="FPS: %2.2f">FPS: 60:00</div>
+        <div id="hud">
+          <div class="hud-stat">
+            <span class="hud-label">Score</span>
+            <span id="hudScore" class="hud-value">0</span>
+          </div>
+          <div class="hud-stat">
+            <span class="hud-label">Level</span>
+            <span id="hudLevel" class="hud-value">1</span>
+          </div>
+          <div class="hud-stat">
+            <span class="hud-label">Cannons</span>
+            <span id="hudCannons" class="hud-value">1</span>
+          </div>
+          <div class="hud-stat hud-stat-shield">
+            <span class="hud-label">Shield</span>
+            <span id="hudShield" class="hud-pips"></span>
+          </div>
+          <div class="hud-stat hud-stat-wide">
+            <span class="hud-label">XP</span>
+            <span class="hud-bar"><span id="hudExperience"></span></span>
+          </div>
+        </div>
+        <div id="info" hidden>
+          <div id="fps" data-format="FPS: %2.2f">FPS: 60.00</div>
         </div>
         <canvas id="gameCanvas" width="800" height="600"></canvas>
       </div>

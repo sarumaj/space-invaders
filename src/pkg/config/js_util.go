@@ -541,26 +541,31 @@ func SendMessage(msg string, reset, event logEvent) {
 		return // Already active, nothing to do
 	}
 
-	// Flash the channel
+	// Flash the channel.
+	// The listener is created once per channel in setupMessageBoxInterface and
+	// re-registered here: allocating a js.FuncOf per message leaked one entry of
+	// the global callback registry for every enemy hit, and only Release frees
+	// them. Registering the same function twice is a no-op, so the "once" option
+	// still leaves exactly one listener attached.
 	channelBtn.Get("classList").Call("add", tabFlashClass)
-	channelBtn.Call("addEventListener", "animationend", js.FuncOf(func(this js.Value, _ []js.Value) any {
-		this.Get("classList").Call("remove", tabFlashClass)
-		if !event { // If not event log, activate the tab
-			this.Get("classList").Call("add", tabActiveClass)
-			this.Call("click")
-		}
-		return nil
-	}), js.ValueOf(map[string]any{"once": true}))
+	channelBtn.Call("addEventListener", "animationend", flashEndCallbacks[event], flashEndOptions)
 }
 
 // SendMessageThrottled sends a message to the message box with a cooldown.
-func SendMessageThrottled(msg string, reset, event logEvent, cooldown time.Duration) {
-	if !lastLogSentTime.IsZero() && time.Since(lastLogSentTime) < cooldown {
+// The cooldown is tracked per topic so that a chatty message cannot suppress an
+// unrelated one, which a single shared timestamp used to do.
+func SendMessageThrottled(topic string, msg string, reset, event logEvent, cooldown time.Duration) {
+	lastLogSentMutex.Lock()
+	last, seen := lastLogSentTime[topic]
+	if seen && time.Since(last) < cooldown {
+		lastLogSentMutex.Unlock()
 		return
 	}
 
+	lastLogSentTime[topic] = time.Now()
+	lastLogSentMutex.Unlock()
+
 	SendMessage(msg, reset, event)
-	lastLogSentTime = time.Now()
 }
 
 // Setenv is a function that sets the environment variable key to value.
@@ -686,6 +691,56 @@ func Unsetenv(key string) {
 	environ.Delete(key)
 	GlobalSet(goEnv, environ)
 	invalidateEnvCache()
+}
+
+// UpdateHUD refreshes the on-screen display.
+// Only the values that changed are written back, because touching the DOM on
+// every frame for numbers that change a few times a minute would undo the point
+// of having a heads-up display at all.
+func UpdateHUD(state HUD) {
+	if state == lastHUD {
+		return
+	}
+
+	if state.Score != lastHUD.Score {
+		hudScoreSpan.Set("textContent", state.Score)
+	}
+
+	if state.Level != lastHUD.Level {
+		hudLevelSpan.Set("textContent", state.Level)
+	}
+
+	if state.Cannons != lastHUD.Cannons {
+		hudCannonsSpan.Set("textContent", state.Cannons)
+	}
+
+	if state.Experience != lastHUD.Experience {
+		hudExperienceBar.Get("style").Set("width", fmt.Sprintf("%.1f%%", state.Experience*100))
+	}
+
+	if state.ShieldCharge != lastHUD.ShieldCharge || state.ShieldCapacity != lastHUD.ShieldCapacity {
+		filled, shown := state.ShieldGauge()
+
+		var pips string
+		for i := 0; i < shown; i++ {
+			if i < filled {
+				pips += `<i class="charged"></i>`
+				continue
+			}
+
+			pips += "<i></i>"
+		}
+
+		// Once the pips stand for a proportion rather than for single charges,
+		// they cannot be counted, so the exact figures go next to them.
+		if state.ShieldSummarized() {
+			pips += fmt.Sprintf("<b>%d/%d</b>", state.ShieldCharge, state.ShieldCapacity)
+		}
+
+		hudShieldPips.Set("innerHTML", pips)
+	}
+
+	lastHUD = state
 }
 
 // UpdateFPS is a function that updates the frames per second.

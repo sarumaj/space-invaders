@@ -2,6 +2,8 @@ package enemy
 
 import (
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
@@ -17,6 +19,24 @@ type Enemy struct {
 	SpecialtyLikeliness numeric.Number            // SpecialtyLikeliness is the likelihood of the enemy being a tank or a freezer (expected to be lower than 1).
 	Level               *EnemyLevel               // Level is the level of the enemy.
 	kind                EnemyType                 // Type is the type of the enemy.
+	phase               numeric.Number            // Phase is the position within the enemy's own movement cycle, in radians.
+	flash               numeric.Number            // Flash is how much of the hit highlight is still showing, from 1 down to 0.
+	lastFired           time.Time                 // Last time the enemy fired its cannon.
+	detonated           bool                      // Detonated is true once the destruction animation has been started for this enemy.
+}
+
+// Detonate reports whether the enemy has just been destroyed and its destruction
+// animation still has to be started, and records that it has been.
+// Enemies are destroyed from several places, so asking after the fact keeps the
+// animation from having to be spawned at each of them.
+func (enemy *Enemy) Detonate() bool {
+	if enemy.detonated || !enemy.IsDestroyed() {
+		return false
+	}
+
+	enemy.detonated = true
+
+	return true
 }
 
 // Area returns the area of the enemy.
@@ -109,14 +129,15 @@ func (enemy *Enemy) Draw() {
 	enemy.Color.Interpolate()
 	enemy.Geometry.Interpolate()
 
-	config.DrawSpaceship(
+	config.DrawEnemy(
 		enemy.Geometry.Position().Pack(),
 		enemy.Geometry.Size().Pack(),
-		enemy.kind == Tank, // Face up if the enemy is a tank
+		enemy.kind.GetShape(),
 		enemy.kind.GetColor().FormatRGBA(),
 		label,
 		statusValues,
 		statusColors,
+		enemy.flash.Float(),
 	)
 }
 
@@ -129,57 +150,113 @@ func (enemy *Enemy) Hit(damage int) int {
 
 	enemy.Level.HitPointsLoss += damage
 	enemy.Level.HitPoints -= damage
+	enemy.flash = 1 // Light the enemy up so the hit is visible, not only audible.
 
 	go config.PlayAudio("enemy_hit.wav", false)
 
 	return damage
 }
 
+// FadeFlash decays the highlight left by the last hit.
+func (enemy *Enemy) FadeFlash(scale numeric.Number) {
+	enemy.flash = (enemy.flash - numeric.Number(config.Config.Enemy.FlashDecay)*scale).Clamp(0, 1)
+}
+
 // IsDestroyed returns true if the enemy is destroyed.
 func (enemy Enemy) IsDestroyed() bool { return enemy.Level.HitPoints <= 0 }
 
-// Move moves the enemy.
-// The enemy moves downwards and changes its horizontal direction.
-// If the enemy is a tank, it moves only downwards and does not change its horizontal direction.
-// The direction of the enemy is based on the position of the spaceship.
-// If the spaceship is below the enemy, the enemy moves towards the spaceship.
-// Otherwise, the enemy moves randomly.
-func (enemy *Enemy) Move(spaceshipPosition numeric.Position) {
-	if enemy.kind == Tank {
-		enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, numeric.Number(enemy.Level.Speed))))
-		return
+// Move moves the enemy according to the behaviour of its type.
+// The scale is how far the frame advances the simulation, expressed in nominal
+// frames. Every type used to run the same homing chase, so the twelve names in
+// the roster were only ever a difference in statistics; the behaviours below are
+// what makes them read differently in play.
+func (enemy *Enemy) Move(spaceshipPosition numeric.Position, scale numeric.Number) {
+	enemy.phase += numeric.Number(config.Config.Enemy.PhaseRate) * scale
+
+	// Every type falls towards the bottom of the screen at its own speed.
+	descent := numeric.Number(enemy.Level.Speed) * scale
+	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, descent)))
+
+	var drift numeric.Position
+	switch enemy.kind.GetBehavior() {
+	case Drifter:
+		// Holds its line and ignores the spaceship entirely.
+
+	case Strafer:
+		// Sweeps sideways as it descends, crossing the lanes the player wants
+		// to shoot along instead of walking straight into the fire.
+		drift.X = numeric.Number(math.Cos(enemy.phase.Float())) *
+			numeric.Number(config.Config.Enemy.StrafeAmplitude) * scale
+
+	case Charger:
+		// Commits to the spaceship's column and keeps closing, which is what
+		// makes it dangerous even though it never turns around.
+		if delta := spaceshipPosition.X - enemy.Geometry.Position().X; delta.Abs() > 1 {
+			drift.X = delta.Polarity() * numeric.Number(config.Config.Enemy.ChargeSpeed) * scale
+		}
+		drift.Y = descent * numeric.Number(config.Config.Enemy.ChargeSpeed)
+
+	case Lurker:
+		// Hangs back and edges closer, betting on being hard to see.
+		drift = spaceshipPosition.Sub(enemy.Geometry.Position()).Normalize().
+			Mul(numeric.Number(config.Config.Enemy.LurkSpeed) * scale)
+
+	default: // Chaser
+		// The original homing chase, kept for the rank and file.
+		delta := spaceshipPosition.Sub(enemy.Geometry.Position())
+		strength := numeric.Number(enemy.Level.Progress) / (delta.Magnitude() + 1) // Add 1 to avoid division by zero
+		drift = delta.Add(numeric.Locate(
+			numeric.RandomRange(-0.5, 0.5), // Random number between -0.5 and 0.5
+			numeric.RandomRange(-1, 0),     // Random number between -1 and 0
+		)).Mul(strength * scale)
+
 	}
-
-	// Calculate the horizontal and vertical distances to the spaceship
-	delta := spaceshipPosition.Sub(enemy.Geometry.Position())
-
-	// Calculate the distance to the spaceship
-	distance := delta.Magnitude()
-
-	// Define the strength formula
-	strength := numeric.Number(enemy.Level.Progress) / (distance + 1) // Add 1 to avoid division by zero
-
-	// Add randomness to the chase based on strength
-	delta = delta.Add(numeric.Locate(
-		numeric.RandomRange(-0.5, 0.5), // Random number between -0.5 and 0.5
-		numeric.RandomRange(-1, 0),     // Random number between -1 and 0
-	)).Mul(strength)
 
 	// Limit the speed of the enemy
-	if delta.Magnitude().Float() > config.Config.Enemy.MaximumSpeed {
-		delta = delta.Normalize().Mul(numeric.Number(config.Config.Enemy.MaximumSpeed))
+	if maximum := numeric.Number(config.Config.Enemy.MaximumSpeed) * scale; drift.Magnitude() > maximum {
+		drift = drift.Normalize().Mul(maximum)
 	}
-
-	// Move down using the speed
-	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, numeric.Number(enemy.Level.Speed))))
 
 	// Dash off screen if the spaceship is below the enemy and the enemy is close to the spaceship
 	if enemy.Geometry.Position().Y > spaceshipPosition.Y && enemy.Geometry.Position().Sub(spaceshipPosition).X.Abs() < enemy.Geometry.Size().ToVector().Magnitude() {
-		delta.Y = numeric.Number(config.Config.Enemy.MaximumSpeed)
+		drift.Y = numeric.Number(config.Config.Enemy.MaximumSpeed) * scale
 	}
 
 	// Move horizontally and vertically towards the spaceship
-	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(delta))
+	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(drift))
+
+	// Keep the enemy inside the canvas horizontally, so that a strafing or
+	// charging enemy cannot park itself off screen where it cannot be shot.
+	canvasDimensions := config.CanvasBoundingBox()
+	enemy.Geometry.SetPosition(numeric.Locate(
+		enemy.Geometry.Position().X.Clamp(0, numeric.Number(canvasDimensions.OriginalWidth)-enemy.Geometry.Size().Width),
+		enemy.Geometry.Position().Y,
+	))
+}
+
+// FireCannon reports whether the enemy shoots at the spaceship on this frame and,
+// if so, the position its bullet starts from and the damage it carries.
+//
+// The bullet itself is created by the caller: the bullet package needs the enemy
+// package to resolve collisions, so an enemy cannot hold its own bullets without
+// forming an import cycle.
+func (enemy *Enemy) FireCannon() (numeric.Position, int, bool) {
+	if !enemy.kind.Armed() || time.Since(enemy.lastFired) < config.Config.Enemy.FireCooldown {
+		return numeric.Position{}, 0, false
+	}
+
+	// Spread the volleys out instead of having every armed enemy fire on the
+	// same frame its cooldown expires.
+	if !numeric.SampleUniform(numeric.Number(config.Config.Enemy.FireLikeliness)) {
+		return numeric.Position{}, 0, false
+	}
+
+	enemy.lastFired = time.Now()
+
+	origin := enemy.Geometry.Position().Add(numeric.Locate(enemy.Geometry.Size().Width/2, enemy.Geometry.Size().Height))
+	damage := numeric.Randomize(config.Config.Enemy.BulletDamage*enemy.Level.Progress, 0.3)
+
+	return origin, damage, true
 }
 
 // String returns the string representation of the enemy.

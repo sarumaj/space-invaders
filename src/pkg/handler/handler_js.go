@@ -3,13 +3,25 @@
 package handler
 
 import (
-	"fmt"
 	"sync"
 	"syscall/js"
 	"time"
 
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/numeric"
+)
+
+// maximumFrameScale caps how far a single frame may advance the simulation.
+// A backgrounded tab resumes with an arbitrarily long gap, and letting objects
+// travel that far in one step would tunnel them straight through every collision
+// check.
+const maximumFrameScale = 4
+
+// frameSource is the shared animation frame channel, and frameSourceOnce guards
+// its construction.
+var (
+	frameSource     <-chan numeric.Number
+	frameSourceOnce sync.Once
 )
 
 // ask is a method that asks the user for input.
@@ -24,81 +36,75 @@ func (h *handler) ask() {
 	}
 }
 
-// monitor is a method that watches the FPS rate of the game.
-func (h *handler) monitor() {
-	if !running.Get(h.ctx) {
-		return
-	}
+// frames returns a channel that yields one value per animation frame, carrying
+// how long that frame lasted expressed in nominal frames, so that motion can be
+// scaled by it. Driving the loop from requestAnimationFrame keeps the simulation
+// aligned with the display refresh; the fixed ticker this replaces was
+// free-running against vsync, which showed as constant judder, and it made every
+// speed in the configuration depend on the loop actually hitting its rate.
+//
+// The channel has room for a single frame and a frame is dropped rather than
+// queued when the loop is still busy, so a slow frame costs one update instead of
+// building a backlog the loop can never catch up with.
+func frames() <-chan numeric.Number {
+	// The game loop is restarted after every game over, and the animation frame
+	// chain below never stops, so the source is built once and shared.
+	frameSourceOnce.Do(func() { frameSource = newFrameSource() })
 
-	frameCount := 0
-	suspendedFrameCount := 0
-	lastFrameTime := time.Now()
+	return frameSource
+}
 
-	var watchdog func(js.Value, []js.Value) any
-	watchdog = func(_ js.Value, _ []js.Value) any {
-		frameCount++
-		now := time.Now()
+// newFrameSource starts the animation frame chain feeding the game loop.
+func newFrameSource() <-chan numeric.Number {
+	const reportFramesEvery = 500 // milliseconds between frame-rate reports
 
-		precision := 1.0 // every second
-		if config.Config.Control.CriticalFramesPerSecondRate > 10 {
-			precision = 0.1 // every 100ms
+	out := make(chan numeric.Number, 1)
+	nominal := 1_000 / config.Config.Control.DesiredFramesPerSecondRate // milliseconds per nominal frame
+
+	var previous, measuredSince float64
+	var measuredFrames int
+
+	// One js.Func, reused for the lifetime of the page. The frame watchdog this
+	// replaces allocated a fresh one on every frame and released none of them,
+	// leaking sixty entries of the callback registry per second.
+	var step js.Func
+	step = js.FuncOf(func(_ js.Value, p []js.Value) any {
+		config.GlobalCall("requestAnimationFrame", step)
+
+		now := p[0].Float()
+		elapsed := now - previous
+		if previous == 0 {
+			elapsed, measuredSince = nominal, now
+		}
+		previous = now
+
+		// Report the measured rate rather than acting on it: with motion scaled
+		// by the frame time a slow frame no longer runs the game in slow motion,
+		// so there is nothing left to suspend the game for.
+		measuredFrames++
+		if window := now - measuredSince; window >= reportFramesEvery {
+			config.UpdateFPS(float64(measuredFrames) * 1_000 / window)
+			measuredFrames, measuredSince = 0, now
 		}
 
-		if elapsed := now.Sub(lastFrameTime).Seconds(); elapsed >= precision {
-			fps := float64(frameCount) / elapsed
-			config.UpdateFPS(fps)
-
-			switch {
-			case fps <= config.Config.Control.CriticalFramesPerSecondRate:
-				if running.Get(h.ctx) { // If the game is running
-					if config.Config.Control.Debug.Get() {
-						config.Log(fmt.Sprintf("Performance dropped to %f FPS", fps))
-					}
-
-					running.Set(&h.ctx, false)  // Pause the game
-					suspended.Set(&h.ctx, true) // Set the suspended state
-				}
-
-			case fps >= (config.Config.Control.CriticalFramesPerSecondRate+config.Config.Control.DesiredFramesPerSecondRate)/2 &&
-				!running.Get(h.ctx):
-
-				if suspendedFrameCount < config.Config.Control.SuspensionFrames {
-					// Increase the suspended frame count
-					suspendedFrameCount++
-
-				} else {
-					// Reset the suspended frame count
-					suspendedFrameCount = 0
-
-					if !paused.Get(h.ctx) { // Do not resume the game if it is paused
-						if config.Config.Control.Debug.Get() {
-							config.Log(fmt.Sprintf("Performance improved to %f FPS", fps))
-						}
-
-						running.Set(&h.ctx, true)    // Resume the game
-						suspended.Set(&h.ctx, false) // Reset the suspended state
-					}
-
-				}
-
-			}
-			frameCount, lastFrameTime = 0, now
+		select {
+		case out <- numeric.Number(elapsed/nominal).Clamp(0, maximumFrameScale):
+		default:
 		}
 
-		// Schedule the next frame
-		config.GlobalCall("requestAnimationFrame", js.FuncOf(watchdog))
 		return nil
-	}
+	})
 
-	// Schedule the first frame
-	config.GlobalCall("requestAnimationFrame", js.FuncOf(watchdog))
+	config.GlobalCall("requestAnimationFrame", step)
+
+	return out
 }
 
 // registerEventHandlers is a method that registers the event listeners.
 func (h *handler) registerEventHandlers() {
 	h.once.Do(func() {
 		config.GlobalSet("drawFunc", js.FuncOf(func(_ js.Value, _ []js.Value) any {
-			h.draw()
+			h.draw(0) // A redraw after a resize must not advance the scrolling background.
 			return nil
 		}))
 
@@ -127,6 +133,12 @@ func (h *handler) registerEventHandlers() {
 				ArrowLeft:  true,
 				ArrowRight: true,
 				ArrowUp:    true,
+				Escape:     true,
+				KeyA:       true,
+				KeyD:       true,
+				KeyP:       true,
+				KeyS:       true,
+				KeyW:       true,
 				Pause:      true,
 				Space:      true,
 			}

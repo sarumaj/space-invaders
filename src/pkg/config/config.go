@@ -67,23 +67,35 @@ type config struct {
 		SuspensionFrames                  int
 	}
 
+	Effect struct {
+		BlastDuration time.Duration
+	}
+
 	Enemy struct {
 		AccelerationProgress      float64
+		BulletDamage              int
+		ChargeSpeed               float64
 		Count                     int
 		CountProgressStep         int
 		BerserkLikeliness         float64
 		BerserkLikelinessProgress float64
 		DefaultPenalty            int
 		DefenseProgress           int
+		FireCooldown              time.Duration
+		FireLikeliness            float64
+		FlashDecay                float64
 		Height                    float64
 		HitpointProgress          int
 		InitialDefense            int
 		InitialHitpoints          int
 		InitialSpeed              float64
+		LurkSpeed                 float64
 		MaximumCount              int
 		MaximumSpeed              float64
+		PhaseRate                 float64
 		Regenerate                *bool
 		SpecialtyLikeliness       float64
+		StrafeAmplitude           float64
 		Width                     float64
 		YetAgainAmplifier         float64
 
@@ -206,6 +218,7 @@ type config struct {
 		MaximumRadius        float64
 		MinimumRadius        float64
 		SpeedRatio           float64
+		SpinRate             float64
 
 		Impact struct {
 			DefaultGravityStrength float64
@@ -287,6 +300,7 @@ type config struct {
 		CannonProgress         int
 		Cooldown               time.Duration
 		DamageDuration         time.Duration
+		Drag                   float64
 		ExperienceScaler       float64
 		FreezeDuration         time.Duration
 		Height                 float64
@@ -294,6 +308,8 @@ type config struct {
 		MaximumCannons         int
 		MaximumLabelLength     int
 		MaximumSpeed           float64
+		MinimumSpeed           float64
+		PointerOffsetFactor    float64
 		ShieldChargeDuration   time.Duration
 		Width                  float64
 	}

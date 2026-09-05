@@ -84,6 +84,17 @@ func (lvl *SpaceshipLevel) GainExperience(e enemy.Enemy) bool {
 	return lvl.Progress > currentLvl
 }
 
+// ExperienceRatio returns how far the spaceship is towards its next level, from
+// 0 to 1.
+func (lvl SpaceshipLevel) ExperienceRatio() float64 {
+	required := lvl.GetRequiredExperience()
+	if required <= 0 {
+		return 0
+	}
+
+	return numeric.Number(float64(lvl.Experience)/float64(required)).Clamp(0, 1).Float()
+}
+
 // GetRequiredExperience returns the required experience for the spaceship.
 func (lvl SpaceshipLevel) GetRequiredExperience() int {
 	return (numeric.E.Pow(numeric.Number(lvl.Progress) / numeric.Number(config.Config.Spaceship.ExperienceScaler))).Int()

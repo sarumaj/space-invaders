@@ -3,10 +3,11 @@ package handler
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/numeric"
+	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/bullet"
+	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/effect"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/enemy"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/planet"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/spaceship"
@@ -15,19 +16,21 @@ import (
 
 // handler is the game handler.
 type handler struct {
-	ctx        context.Context      // ctx is an abortable context of the handler
-	cancel     context.CancelFunc   // cancel is the cancel function of the handler
-	enemies    enemy.Enemies        // enemies is the list of enemies
-	keyEvent   chan keyEvent        // keyupEvent is the channel for key events
-	keysHeld   map[keyBinding]bool  // keysHeld is the map of keys held
-	mouseEvent chan mouseEvent      // mouseEvent is the channel for mouse events
-	mouseHeld  map[mouseButton]bool // mouseHeld is the map of mouse buttons held
-	once       sync.Once            // once is meant to register the keydown event only once
-	planet     *planet.Planet       // planet is the planet to be drawn
-	spaceship  *spaceship.Spaceship // spaceship is the player's spaceship
-	stars      star.Stars           // stars is the list of stars
-	touchEvent chan touchEvent      // touchEvent is the channel for touch events
-	touchHeld  bool                 // touchHeld is the flag to indicate if the touch is held
+	ctx          context.Context      // ctx is an abortable context of the handler
+	cancel       context.CancelFunc   // cancel is the cancel function of the handler
+	enemies      enemy.Enemies        // enemies is the list of enemies
+	enemyBullets bullet.Bullets       // enemyBullets are the bullets fired by the enemies; they live here because the bullet package already depends on the enemy package
+	blasts       effect.Blasts        // blasts are the destruction animations currently playing
+	keyEvent     chan keyEvent        // keyupEvent is the channel for key events
+	keysHeld     map[action]bool      // keysHeld is the set of actions whose key is currently down
+	mouseEvent   chan mouseEvent      // mouseEvent is the channel for mouse events
+	mouseHeld    map[mouseButton]bool // mouseHeld is the map of mouse buttons held
+	once         sync.Once            // once is meant to register the keydown event only once
+	planet       *planet.Planet       // planet is the planet to be drawn
+	spaceship    *spaceship.Spaceship // spaceship is the player's spaceship
+	stars        star.Stars           // stars is the list of stars
+	touchEvent   chan touchEvent      // touchEvent is the channel for touch events
+	touchHeld    bool                 // touchHeld is the flag to indicate if the touch is held
 }
 
 // applyGravityOnEnemies applies gravity to the enemies.
@@ -505,11 +508,16 @@ func (h *handler) checkCollisions() {
 			}
 
 			h.spaceship.Bullets[i].Exhaust() // Exhaust the bullet.
-			config.SendMessage(config.Execute(config.Config.MessageBox.Messages.EnemyHit, config.Template{
-				"EnemyName": e.Name,
-				"EnemyType": e.Type(),
-				"Damage":    damage,
-			}), false, true)
+
+			// Throttled: with eight cannons on an 85ms cooldown this fires about
+			// ninety times a second, and every message reparses HTML and restarts
+			// a smooth scroll, which drowns the log and stalls the frame.
+			config.SendMessageThrottled("enemy_hit",
+				config.Execute(config.Config.MessageBox.Messages.EnemyHit, config.Template{
+					"EnemyName": e.Name,
+					"EnemyType": e.Type(),
+					"Damage":    damage,
+				}), false, true, config.Config.MessageBox.ChannelLogThrottling)
 
 			// If the enemy has no health points, upgrade the spaceship.
 			if h.enemies[j].IsDestroyed() && h.spaceship.Level.GainExperience(e) {
@@ -539,7 +547,7 @@ func (h *handler) checkCollisions() {
 // It draws the spaceship.
 // It draws the enemies.
 // It draws the bullets.
-func (h *handler) draw() {
+func (h *handler) draw(scale numeric.Number) {
 	config.ClearCanvas()
 
 	// Draw stars on the background.
@@ -554,7 +562,7 @@ func (h *handler) draw() {
 	}
 
 	// Draw background
-	config.DrawBackground(h.spaceship.Level.AccelerateRate.Float() * config.Config.Star.SpeedRatio)
+	config.DrawBackground(h.spaceship.Level.AccelerateRate.Float() * config.Config.Star.SpeedRatio * scale.Float())
 
 	// Draw planet
 	h.planet.Draw()
@@ -571,6 +579,13 @@ func (h *handler) draw() {
 	for _, b := range h.spaceship.Bullets {
 		b.Draw()
 	}
+
+	for _, b := range h.enemyBullets {
+		b.Draw()
+	}
+
+	// Draw the destruction animations last, so they read as being in front.
+	h.blasts.Draw()
 }
 
 // handleKeyEvent handles the key event.
@@ -588,13 +603,10 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 		return
 
 	default:
+		bound := key.Key.Action()
+
 		if !key.Pressed {
-			switch key.Key {
-			case ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Space:
-				delete(h.keysHeld, key.Key)
-
-			}
-
+			delete(h.keysHeld, bound)
 			return
 		}
 
@@ -602,12 +614,14 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 			return
 		}
 
-		switch key.Key {
-		case ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Space:
-			h.keysHeld[key.Key] = true
+		switch bound {
+		case actionNone:
 
-		case Pause:
+		case actionPause:
 			h.pause()
+
+		default:
+			h.keysHeld[bound] = true
 
 		}
 	}
@@ -615,31 +629,31 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 
 // handleKeyHold handles the key hold event.
 // It fires bullets when the space key is held.
-func (h *handler) handleKeyhold() {
+func (h *handler) handleKeyhold(scale numeric.Number) {
 	select {
 	case <-h.ctx.Done():
 		return
 
 	default:
-		for key, ok := range h.keysHeld {
-			if !ok {
+		for _, held := range heldActions {
+			if !h.keysHeld[held] {
 				continue
 			}
 
-			switch key {
-			case ArrowDown:
-				h.spaceship.MoveDown()
+			switch held {
+			case actionMoveDown:
+				h.spaceship.MoveDown(scale)
 
-			case ArrowLeft:
-				h.spaceship.MoveLeft()
+			case actionMoveLeft:
+				h.spaceship.MoveLeft(scale)
 
-			case ArrowRight:
-				h.spaceship.MoveRight()
+			case actionMoveRight:
+				h.spaceship.MoveRight(scale)
 
-			case ArrowUp:
-				h.spaceship.MoveUp()
+			case actionMoveUp:
+				h.spaceship.MoveUp(scale)
 
-			case Space:
+			case actionFire:
 				h.spaceship.Fire()
 
 			}
@@ -692,7 +706,7 @@ func (h *handler) handleMouse(event mouseEvent) {
 
 		// handling of mouse move event
 		h.mouseHeld[event.Button] = true // make sure the button is held (if button down event has been missed)
-		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition)
+		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition, 1)
 	}
 }
 
@@ -744,7 +758,7 @@ func (h *handler) handleTouch(event touchEvent) {
 
 		// handle touch move event
 		h.touchHeld = true // make sure the touch is held (if touch down event has been missed)
-		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition)
+		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition, 1)
 	}
 }
 
@@ -753,16 +767,16 @@ func (h *handler) handleTouch(event touchEvent) {
 // If the current position is not zero, it moves the spaceship to the current position.
 // If the start position is not zero, it moves the spaceship to the start position.
 // It corrects the position by the canvas dimensions.
-func (h *handler) handleMoveEventTypes(eventCurrentPosition, eventStartPosition numeric.Position) {
+func (h *handler) handleMoveEventTypes(eventCurrentPosition, eventStartPosition numeric.Position, scale numeric.Number) {
 	canvasDimensions := config.CanvasBoundingBox()
 	positionCorrection := numeric.Locate(canvasDimensions.ScaleWidth, canvasDimensions.ScaleHeight)
 
 	switch {
 	case !eventCurrentPosition.IsZero():
-		h.spaceship.MoveTo(eventCurrentPosition.DivX(positionCorrection))
+		h.spaceship.MoveTo(eventCurrentPosition.DivX(positionCorrection), scale)
 
 	case !eventStartPosition.IsZero():
-		h.spaceship.MoveTo(eventStartPosition.DivX(positionCorrection))
+		h.spaceship.MoveTo(eventStartPosition.DivX(positionCorrection), scale)
 
 	}
 }
@@ -808,7 +822,7 @@ func (h *handler) pause() {
 // The spaceship is drawn in yellow color if it is boosted.
 // The spaceship is drawn in white color if it is normal.
 // If draws objects as rectangles.
-func (h *handler) render() {
+func (h *handler) render(scale numeric.Number) {
 	switch {
 	case
 		offline.Get(h.ctx),                             // If the game is offline, do nothing.
@@ -818,7 +832,16 @@ func (h *handler) render() {
 		return
 	}
 
-	h.draw()
+	h.draw(scale)
+
+	config.UpdateHUD(config.HUD{
+		Score:          h.spaceship.Level.HighScore,
+		Level:          h.spaceship.Level.Progress,
+		Cannons:        h.spaceship.Level.Cannons,
+		ShieldCharge:   h.spaceship.Level.Shield.Charge,
+		ShieldCapacity: h.spaceship.Level.Shield.Capacity,
+		Experience:     h.spaceship.Level.ExperienceRatio(),
+	})
 }
 
 // refresh refreshes the game state.
@@ -826,7 +849,7 @@ func (h *handler) render() {
 // It updates the enemies.
 // It updates the state of the spaceship.
 // It checks the collisions.
-func (h *handler) refresh() {
+func (h *handler) refresh(scale numeric.Number) {
 	switch {
 	case
 		offline.Get(h.ctx),   // If the game is offline, do nothing.
@@ -837,25 +860,102 @@ func (h *handler) refresh() {
 	}
 
 	// Update the positions of the enemies.
-	h.enemies.Update(h.spaceship.Geometry.Position())
+	h.enemies.Update(h.spaceship.Geometry.Position(), scale)
 
 	// Update the position of the planet.
-	h.planet.Update(h.spaceship.Level.AccelerateRate * numeric.Number(config.Config.Planet.SpeedRatio))
+	h.planet.Update(h.spaceship.Level.AccelerateRate * numeric.Number(config.Config.Planet.SpeedRatio) * scale)
 
 	// Update the state of the spaceship.
-	h.spaceship.UpdateState()
+	h.spaceship.UpdateState(scale)
 
 	// Recharge the shield of the spaceship.
 	h.spaceship.Level.Shield.Recharge()
 
 	// Update the positions of the bullets.
-	h.spaceship.Bullets.Update()
+	h.spaceship.Bullets.Update(scale)
+	h.enemyBullets.Update(scale)
+
+	// Let the armed enemies return fire.
+	h.fireEnemyCannons()
 
 	// Apply the impact of the planet on the system.
 	h.applyPlanetImpact()
 
 	// Check the collisions.
 	h.checkCollisions()
+	h.checkEnemyFire()
+
+	// Start a destruction animation for whatever died this frame, and age the
+	// ones already running.
+	h.collectBlasts()
+	h.blasts.Update(scale)
+}
+
+// collectBlasts starts a destruction animation for every enemy that died since
+// the last frame. Enemies are destroyed by collisions, by bullets and by the
+// black hole, so they are collected here rather than at each of those sites.
+func (h *handler) collectBlasts() {
+	for i := range h.enemies {
+		if !h.enemies[i].Detonate() {
+			continue
+		}
+
+		h.blasts.Detonate(
+			h.enemies[i].Geometry.Position().Add(h.enemies[i].Geometry.Size().Half().ToVector()),
+			h.enemies[i].Geometry.Size().ToVector().Magnitude()/2,
+			h.enemies[i].Type().GetBlast(),
+			h.enemies[i].Type().GetColor().FormatRGBA(),
+		)
+	}
+}
+
+// fireEnemyCannons lets every armed enemy take its shot.
+// The bullets are held by the handler rather than by the enemies: the bullet
+// package resolves collisions against enemies, so an enemy owning its own bullets
+// would close an import cycle.
+func (h *handler) fireEnemyCannons() {
+	for i := range h.enemies {
+		origin, damage, fired := h.enemies[i].FireCannon()
+		if !fired {
+			continue
+		}
+
+		h.enemyBullets.ReloadHostile(origin, damage, 0, h.enemies[i].Level.Speed)
+	}
+}
+
+// checkEnemyFire applies the damage of the enemy bullets that reached the spaceship.
+func (h *handler) checkEnemyFire() {
+	for i := range h.enemyBullets {
+		if h.enemyBullets[i].Exhausted || !h.enemyBullets[i].HasHitSpaceship(h.spaceship.Geometry.Position(), h.spaceship.Geometry.Size()) {
+			continue
+		}
+
+		h.enemyBullets[i].Exhaust()
+
+		// A shot costs the spaceship a level, exactly as a collision does, so the
+		// shield stays the thing that absorbs it.
+		if !h.spaceship.Penalize(1) {
+			continue
+		}
+
+		config.SendMessageThrottled("spaceship_shot",
+			config.Execute(config.Config.MessageBox.Messages.SpaceshipDowngradedByEnemy, config.Template{
+				"SpaceshipLevel": h.spaceship.Level.Progress,
+			}), false, true, config.Config.MessageBox.ChannelLogThrottling)
+
+		if h.spaceship.IsDestroyed() {
+			config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GameOver, config.Template{
+				"DiscoveredPlanets": h.spaceship.Discovered(),
+				"HighScore":         h.spaceship.Level.HighScore,
+				"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
+				"TopScores":         config.GetScores(10),
+			}), false, false)
+			h.pause()
+			h.cancel()
+			return
+		}
+	}
 }
 
 // start starts the game if not already started.
@@ -904,7 +1004,7 @@ func (h *handler) GenerateEnemies(num int, randomY bool) {
 // It refreshes the game state, renders the game, and handles the keydown events.
 // It should be called in a separate goroutine.
 func (h *handler) Loop() {
-	fpsRate := time.Second / time.Duration(config.Config.Control.DesiredFramesPerSecondRate)
+	frame := frames()
 
 	if isFirstTime.Get(h.ctx) {
 		config.SendMessage(config.Execute(config.Config.MessageBox.Messages.Greeting, config.Template{
@@ -923,10 +1023,12 @@ func (h *handler) Loop() {
 
 	// Wait for the initial user input.
 	for !running.Get(h.ctx) {
-		h.render()
 		select {
 		case <-h.ctx.Done():
 			return
+
+		case scale := <-frame:
+			h.render(scale)
 
 		case key := <-h.keyEvent:
 			h.handleKeyEvent(key)
@@ -937,24 +1039,18 @@ func (h *handler) Loop() {
 		case event := <-h.touchEvent:
 			h.handleTouch(event)
 
-		default:
-			time.Sleep(fpsRate)
-
 		}
 	}
 
-	h.monitor() // Monitor the FPS rate.
-
-	for ticker := time.NewTicker(fpsRate); ; {
+	for {
 		select {
 		case <-h.ctx.Done():
 			return
 
-		case <-ticker.C:
-
-			h.refresh()
-			h.render()
-			h.handleKeyhold()
+		case scale := <-frame:
+			h.refresh(scale)
+			h.render(scale)
+			h.handleKeyhold(scale)
 			h.handleMouseHeld()
 			h.handleTouchHeld()
 
@@ -975,6 +1071,8 @@ func (h *handler) Loop() {
 func (h *handler) Restart() {
 	h.spaceship = spaceship.Embark(h.spaceship.Commandant)
 	h.enemies = nil
+	h.enemyBullets = nil
+	h.blasts = nil
 	h.stars = star.Explode(config.Config.Star.Count)
 	h.planet = planet.Reveal(true, true)
 	h.ctx, h.cancel = context.WithCancel(context.Background())
@@ -987,7 +1085,7 @@ func (h *handler) Restart() {
 func New() *handler {
 	h := &handler{
 		keyEvent:   make(chan keyEvent),
-		keysHeld:   make(map[keyBinding]bool),
+		keysHeld:   make(map[action]bool),
 		mouseEvent: make(chan mouseEvent),
 		mouseHeld:  make(map[mouseButton]bool),
 		touchEvent: make(chan touchEvent),
