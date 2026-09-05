@@ -133,6 +133,12 @@ func (h *handler) registerEventHandlers() {
 				ArrowLeft:  true,
 				ArrowRight: true,
 				ArrowUp:    true,
+				Escape:     true,
+				KeyA:       true,
+				KeyD:       true,
+				KeyP:       true,
+				KeyS:       true,
+				KeyW:       true,
 				Pause:      true,
 				Space:      true,
 			}

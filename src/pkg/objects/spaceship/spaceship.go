@@ -26,6 +26,8 @@ type Spaceship struct {
 	Bullets             bullet.Bullets             // Bullets fired by the spaceship
 	Level               *SpaceshipLevel            // Spaceship level
 	state               SpaceshipState             // Spaceship state
+	thrusting           bool                       // Thrusting is true if the spaceship accelerated during the current frame
+	coasting            bool                       // Coasting is true while the spaceship is bleeding off speed with the throttle closed
 	lastFired           time.Time                  // Last time the spaceship fired
 	lastStateTransition time.Time                  // Last time the spaceship changed state
 	lastDiscovery       time.Time                  // Last time the spaceship discovered a planet
@@ -382,6 +384,10 @@ func (spaceship *Spaceship) Move(direction Direction, scale numeric.Number) {
 		spaceship.Speed.X += spaceship.Level.AccelerateRate * scale
 	}
 
+	// Hold the throttle open for this axis, so that Decelerate leaves it alone
+	// until the key is released.
+	spaceship.thrusting = true
+
 	// Limit the speed of the spaceship
 	if spaceship.Speed.Magnitude().Float() > config.Config.Spaceship.MaximumSpeed {
 		spaceship.Speed = spaceship.Speed.Normalize().Mul(numeric.Number(config.Config.Spaceship.MaximumSpeed))
@@ -436,6 +442,12 @@ func (spaceship *Spaceship) MoveTo(target numeric.Position, scale numeric.Number
 
 	// Accelerate the spaceship
 	spaceship.Speed = spaceship.Speed.AddN(spaceship.Level.AccelerateRate * scale)
+	spaceship.thrusting = true
+
+	// Keep the spaceship clear of the pointer that is steering it. On a touch
+	// screen the finger sits exactly where the spaceship is asked to go, so
+	// without the offset the player's own hand covers the thing being aimed.
+	target = target.Sub(numeric.Locate(0, spaceship.Geometry.Size().Height*numeric.Number(config.Config.Spaceship.PointerOffsetFactor)))
 
 	// Limit the speed of the spaceship
 	if spaceship.Speed.Magnitude().Float() > config.Config.Spaceship.MaximumSpeed {
@@ -530,11 +542,40 @@ func (spaceship Spaceship) String() string {
 // If the time since the last state transition is greater than
 // the spaceship state duration, the spaceship's state is set to Neutral.
 func (spaceship *Spaceship) UpdateState(scale numeric.Number) {
+	spaceship.Decelerate(scale)
+
 	if time.Since(spaceship.lastStateTransition) < spaceship.state.GetDuration() {
 		return
 	}
 
 	spaceship.ResetState()
+}
+
+// Decelerate bleeds speed off the spaceship on every frame in which no thrust
+// was applied. Without it the spaceship kept whatever speed it had reached, so
+// releasing a key stopped it dead while the next tap resumed at full pace, which
+// is what made the handling feel twitchy rather than weighty.
+func (spaceship *Spaceship) Decelerate(scale numeric.Number) {
+	if spaceship.thrusting {
+		spaceship.thrusting, spaceship.coasting = false, false
+		return
+	}
+
+	if spaceship.Speed.Magnitude() < numeric.Number(config.Config.Spaceship.MinimumSpeed) {
+		spaceship.Speed = numeric.Zeroes()
+		spaceship.Directions = Directions{}
+		return
+	}
+
+	// Announce the coast once, on the frame the throttle closes. Playing it on
+	// every coasting frame would leave the sound running for most of the game.
+	if !spaceship.coasting {
+		spaceship.coasting = true
+
+		go config.PlayAudio("spaceship_deceleration.wav", false)
+	}
+
+	spaceship.Speed = spaceship.Speed.Mul(numeric.Number(config.Config.Spaceship.Drag).Pow(scale))
 }
 
 // Embark creates a new spaceship.

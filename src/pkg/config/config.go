@@ -287,6 +287,7 @@ type config struct {
 		CannonProgress         int
 		Cooldown               time.Duration
 		DamageDuration         time.Duration
+		Drag                   float64
 		ExperienceScaler       float64
 		FreezeDuration         time.Duration
 		Height                 float64
@@ -294,6 +295,8 @@ type config struct {
 		MaximumCannons         int
 		MaximumLabelLength     int
 		MaximumSpeed           float64
+		MinimumSpeed           float64
+		PointerOffsetFactor    float64
 		ShieldChargeDuration   time.Duration
 		Width                  float64
 	}

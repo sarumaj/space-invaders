@@ -18,7 +18,7 @@ type handler struct {
 	cancel     context.CancelFunc   // cancel is the cancel function of the handler
 	enemies    enemy.Enemies        // enemies is the list of enemies
 	keyEvent   chan keyEvent        // keyupEvent is the channel for key events
-	keysHeld   map[keyBinding]bool  // keysHeld is the map of keys held
+	keysHeld   map[action]bool      // keysHeld is the set of actions whose key is currently down
 	mouseEvent chan mouseEvent      // mouseEvent is the channel for mouse events
 	mouseHeld  map[mouseButton]bool // mouseHeld is the map of mouse buttons held
 	once       sync.Once            // once is meant to register the keydown event only once
@@ -592,13 +592,10 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 		return
 
 	default:
+		bound := key.Key.Action()
+
 		if !key.Pressed {
-			switch key.Key {
-			case ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Space:
-				delete(h.keysHeld, key.Key)
-
-			}
-
+			delete(h.keysHeld, bound)
 			return
 		}
 
@@ -606,12 +603,14 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 			return
 		}
 
-		switch key.Key {
-		case ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Space:
-			h.keysHeld[key.Key] = true
+		switch bound {
+		case actionNone:
 
-		case Pause:
+		case actionPause:
 			h.pause()
+
+		default:
+			h.keysHeld[bound] = true
 
 		}
 	}
@@ -625,25 +624,25 @@ func (h *handler) handleKeyhold(scale numeric.Number) {
 		return
 
 	default:
-		for key, ok := range h.keysHeld {
-			if !ok {
+		for _, held := range heldActions {
+			if !h.keysHeld[held] {
 				continue
 			}
 
-			switch key {
-			case ArrowDown:
+			switch held {
+			case actionMoveDown:
 				h.spaceship.MoveDown(scale)
 
-			case ArrowLeft:
+			case actionMoveLeft:
 				h.spaceship.MoveLeft(scale)
 
-			case ArrowRight:
+			case actionMoveRight:
 				h.spaceship.MoveRight(scale)
 
-			case ArrowUp:
+			case actionMoveUp:
 				h.spaceship.MoveUp(scale)
 
-			case Space:
+			case actionFire:
 				h.spaceship.Fire()
 
 			}
@@ -987,7 +986,7 @@ func (h *handler) Restart() {
 func New() *handler {
 	h := &handler{
 		keyEvent:   make(chan keyEvent),
-		keysHeld:   make(map[keyBinding]bool),
+		keysHeld:   make(map[action]bool),
 		mouseEvent: make(chan mouseEvent),
 		mouseHeld:  make(map[mouseButton]bool),
 		touchEvent: make(chan touchEvent),
