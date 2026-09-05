@@ -206,6 +206,7 @@ type config struct {
 		MaximumRadius        float64
 		MinimumRadius        float64
 		SpeedRatio           float64
+		SpinRate             float64
 
 		Impact struct {
 			DefaultGravityStrength float64

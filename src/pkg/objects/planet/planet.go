@@ -15,6 +15,8 @@ type Planet struct {
 	Type           PlanetType
 	additionalMass numeric.Number
 	once           *sync.Once
+	spin           numeric.Number // Angle the planet is currently turned by, in radians.
+	sprite         config.Sprite  // Pre-rendered image of the planet, empty for the animated types.
 }
 
 // Again reveals the planet yet again as new planet.
@@ -26,6 +28,10 @@ func (planet *Planet) Again() {
 	planet.Type = newPlanet.Type
 	planet.additionalMass = 0
 	planet.once = &sync.Once{}
+
+	// The new planet has its own type and radius, so the cached image of the old
+	// one no longer describes it.
+	planet.spin, planet.sprite = 0, config.Sprite{}
 }
 
 // ApplyGravity applies the gravitational force of the planet to the point.
@@ -84,7 +90,21 @@ func (planet *Planet) DoOnce(action func()) { planet.once.Do(action) }
 // Draw draws the planet on the canvas.
 // The planet will be drawn at the specified position with the specified radius.
 // The planet will be drawn with the specified type.
-func (planet Planet) Draw() { planet.Type.Draw(planet.Position, planet.Radius) }
+func (planet *Planet) Draw() {
+	// The sun and the anomalies change from frame to frame, so they are painted
+	// directly; everything else is painted once and then blitted, which is what
+	// makes turning it affordable.
+	if planet.Type.Animated() {
+		planet.Type.Draw(planet.Position, planet.Radius)
+		return
+	}
+
+	if !planet.sprite.Valid() {
+		planet.sprite = planet.Type.Sprite(planet.Radius)
+	}
+
+	config.DrawSprite(planet.sprite, planet.Position.Pack(), planet.spin.Float())
+}
 
 // String returns the string representation of the planet.
 func (planet Planet) String() string {
@@ -96,6 +116,7 @@ func (planet Planet) String() string {
 // If the planet reaches the bottom of the canvas, it will be reborn.
 func (planet *Planet) Update(speed numeric.Number) {
 	planet.Position.Y += speed
+	planet.spin += numeric.Number(config.Config.Planet.SpinRate) * speed
 
 	canvasDimensions := config.CanvasBoundingBox()
 	if (planet.Position.Y - planet.Radius).Float() > canvasDimensions.OriginalHeight {

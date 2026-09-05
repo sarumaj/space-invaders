@@ -63,15 +63,25 @@ func DrawStar(coords [2]float64, spikes int, radius, innerRadius float64, color 
 }
 
 func DrawSun(coords [2]float64, radius float64) {}
-func Getenv(key string) string                  { return os.Getenv(key) }
-func GetScores(top int) (scores []score)        { return }
-func GlobalCall(name string, args ...any) any   { return nil }
-func GlobalGet(key string) any                  { return nil }
-func GlobalSet(key string, value any)           {}
-func IsPlaying(name string) bool                { return false }
-func IsTouchDevice() bool                       { return false }
-func LoadAudio(url string) ([]byte, error)      { return nil, nil }
-func Log(msg string)                            { log.Println(msg) }
+
+// Sprite is an opaque handle to a pre-rendered image.
+// Off the browser there is nothing to render into, so a sprite is never valid and
+// callers fall back to drawing directly.
+type Sprite struct{}
+
+func (Sprite) Valid() bool { return false }
+
+func RenderSprite(size float64, draw func(center [2]float64)) Sprite { return Sprite{} }
+func DrawSprite(sprite Sprite, coords [2]float64, angle float64)     {}
+func Getenv(key string) string                                       { return os.Getenv(key) }
+func GetScores(top int) (scores []score)                             { return }
+func GlobalCall(name string, args ...any) any                        { return nil }
+func GlobalGet(key string) any                                       { return nil }
+func GlobalSet(key string, value any)                                {}
+func IsPlaying(name string) bool                                     { return false }
+func IsTouchDevice() bool                                            { return false }
+func LoadAudio(url string) ([]byte, error)                           { return nil, nil }
+func Log(msg string)                                                 { log.Println(msg) }
 
 func LogError(err error) {
 	if err != nil {
