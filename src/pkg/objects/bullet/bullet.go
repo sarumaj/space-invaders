@@ -112,10 +112,10 @@ func (bullet Bullet) HasHit(e enemy.Enemy) bool {
 // The bullet moves upwards and slightly to the left or right.
 // The skew of the bullet is based on the position of the cannon.
 // If the bullet is repelled, it moves in the direction of the minimum translation vector.
-func (bullet *Bullet) Move() {
+func (bullet *Bullet) Move(scale numeric.Number) {
 	if !bullet.repelVector.IsZero() { // Repel the bullet
 		// Apply repelling motion
-		bullet.Position = bullet.Position.Add(bullet.repelVector)
+		bullet.Position = bullet.Position.Add(bullet.repelVector.Mul(scale))
 
 		// Adjust skew based on repelling vector
 		bullet.Skew += (bullet.repelVector.X / bullet.Speed)
@@ -124,7 +124,7 @@ func (bullet *Bullet) Move() {
 		// Reduce repelling force
 		numberOfFrames := numeric.Number(config.Config.Bullet.SpeedDecayDuration.Seconds() *
 			config.Config.Control.DesiredFramesPerSecondRate)
-		reduction := numeric.E.Pow(-bullet.Speed.Log()/numberOfFrames).Clamp(0, 1)
+		reduction := numeric.E.Pow(-bullet.Speed.Log()*scale/numberOfFrames).Clamp(0, 1)
 		bullet.repelVector = bullet.repelVector.Mul(reduction)
 
 		// Stop repelling if the force is too low
@@ -135,7 +135,7 @@ func (bullet *Bullet) Move() {
 		return
 	}
 
-	bullet.Position = bullet.Position.Add(numeric.Locate(bullet.Skew*bullet.Speed, -bullet.Speed))
+	bullet.Position = bullet.Position.Add(numeric.Locate(bullet.Skew*bullet.Speed*scale, -bullet.Speed*scale))
 }
 
 // Repel repels the bullet from the enemy.

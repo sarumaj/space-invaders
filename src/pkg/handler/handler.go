@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/numeric"
@@ -544,7 +543,7 @@ func (h *handler) checkCollisions() {
 // It draws the spaceship.
 // It draws the enemies.
 // It draws the bullets.
-func (h *handler) draw() {
+func (h *handler) draw(scale numeric.Number) {
 	config.ClearCanvas()
 
 	// Draw stars on the background.
@@ -559,7 +558,7 @@ func (h *handler) draw() {
 	}
 
 	// Draw background
-	config.DrawBackground(h.spaceship.Level.AccelerateRate.Float() * config.Config.Star.SpeedRatio)
+	config.DrawBackground(h.spaceship.Level.AccelerateRate.Float() * config.Config.Star.SpeedRatio * scale.Float())
 
 	// Draw planet
 	h.planet.Draw()
@@ -620,7 +619,7 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 
 // handleKeyHold handles the key hold event.
 // It fires bullets when the space key is held.
-func (h *handler) handleKeyhold() {
+func (h *handler) handleKeyhold(scale numeric.Number) {
 	select {
 	case <-h.ctx.Done():
 		return
@@ -633,16 +632,16 @@ func (h *handler) handleKeyhold() {
 
 			switch key {
 			case ArrowDown:
-				h.spaceship.MoveDown()
+				h.spaceship.MoveDown(scale)
 
 			case ArrowLeft:
-				h.spaceship.MoveLeft()
+				h.spaceship.MoveLeft(scale)
 
 			case ArrowRight:
-				h.spaceship.MoveRight()
+				h.spaceship.MoveRight(scale)
 
 			case ArrowUp:
-				h.spaceship.MoveUp()
+				h.spaceship.MoveUp(scale)
 
 			case Space:
 				h.spaceship.Fire()
@@ -697,7 +696,7 @@ func (h *handler) handleMouse(event mouseEvent) {
 
 		// handling of mouse move event
 		h.mouseHeld[event.Button] = true // make sure the button is held (if button down event has been missed)
-		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition)
+		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition, 1)
 	}
 }
 
@@ -749,7 +748,7 @@ func (h *handler) handleTouch(event touchEvent) {
 
 		// handle touch move event
 		h.touchHeld = true // make sure the touch is held (if touch down event has been missed)
-		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition)
+		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition, 1)
 	}
 }
 
@@ -758,16 +757,16 @@ func (h *handler) handleTouch(event touchEvent) {
 // If the current position is not zero, it moves the spaceship to the current position.
 // If the start position is not zero, it moves the spaceship to the start position.
 // It corrects the position by the canvas dimensions.
-func (h *handler) handleMoveEventTypes(eventCurrentPosition, eventStartPosition numeric.Position) {
+func (h *handler) handleMoveEventTypes(eventCurrentPosition, eventStartPosition numeric.Position, scale numeric.Number) {
 	canvasDimensions := config.CanvasBoundingBox()
 	positionCorrection := numeric.Locate(canvasDimensions.ScaleWidth, canvasDimensions.ScaleHeight)
 
 	switch {
 	case !eventCurrentPosition.IsZero():
-		h.spaceship.MoveTo(eventCurrentPosition.DivX(positionCorrection))
+		h.spaceship.MoveTo(eventCurrentPosition.DivX(positionCorrection), scale)
 
 	case !eventStartPosition.IsZero():
-		h.spaceship.MoveTo(eventStartPosition.DivX(positionCorrection))
+		h.spaceship.MoveTo(eventStartPosition.DivX(positionCorrection), scale)
 
 	}
 }
@@ -813,7 +812,7 @@ func (h *handler) pause() {
 // The spaceship is drawn in yellow color if it is boosted.
 // The spaceship is drawn in white color if it is normal.
 // If draws objects as rectangles.
-func (h *handler) render() {
+func (h *handler) render(scale numeric.Number) {
 	switch {
 	case
 		offline.Get(h.ctx),                             // If the game is offline, do nothing.
@@ -823,7 +822,7 @@ func (h *handler) render() {
 		return
 	}
 
-	h.draw()
+	h.draw(scale)
 }
 
 // refresh refreshes the game state.
@@ -831,7 +830,7 @@ func (h *handler) render() {
 // It updates the enemies.
 // It updates the state of the spaceship.
 // It checks the collisions.
-func (h *handler) refresh() {
+func (h *handler) refresh(scale numeric.Number) {
 	switch {
 	case
 		offline.Get(h.ctx),   // If the game is offline, do nothing.
@@ -842,19 +841,19 @@ func (h *handler) refresh() {
 	}
 
 	// Update the positions of the enemies.
-	h.enemies.Update(h.spaceship.Geometry.Position())
+	h.enemies.Update(h.spaceship.Geometry.Position(), scale)
 
 	// Update the position of the planet.
-	h.planet.Update(h.spaceship.Level.AccelerateRate * numeric.Number(config.Config.Planet.SpeedRatio))
+	h.planet.Update(h.spaceship.Level.AccelerateRate * numeric.Number(config.Config.Planet.SpeedRatio) * scale)
 
 	// Update the state of the spaceship.
-	h.spaceship.UpdateState()
+	h.spaceship.UpdateState(scale)
 
 	// Recharge the shield of the spaceship.
 	h.spaceship.Level.Shield.Recharge()
 
 	// Update the positions of the bullets.
-	h.spaceship.Bullets.Update()
+	h.spaceship.Bullets.Update(scale)
 
 	// Apply the impact of the planet on the system.
 	h.applyPlanetImpact()
@@ -909,7 +908,7 @@ func (h *handler) GenerateEnemies(num int, randomY bool) {
 // It refreshes the game state, renders the game, and handles the keydown events.
 // It should be called in a separate goroutine.
 func (h *handler) Loop() {
-	fpsRate := time.Second / time.Duration(config.Config.Control.DesiredFramesPerSecondRate)
+	frame := frames()
 
 	if isFirstTime.Get(h.ctx) {
 		config.SendMessage(config.Execute(config.Config.MessageBox.Messages.Greeting, config.Template{
@@ -928,10 +927,12 @@ func (h *handler) Loop() {
 
 	// Wait for the initial user input.
 	for !running.Get(h.ctx) {
-		h.render()
 		select {
 		case <-h.ctx.Done():
 			return
+
+		case scale := <-frame:
+			h.render(scale)
 
 		case key := <-h.keyEvent:
 			h.handleKeyEvent(key)
@@ -942,24 +943,18 @@ func (h *handler) Loop() {
 		case event := <-h.touchEvent:
 			h.handleTouch(event)
 
-		default:
-			time.Sleep(fpsRate)
-
 		}
 	}
 
-	h.monitor() // Monitor the FPS rate.
-
-	for ticker := time.NewTicker(fpsRate); ; {
+	for {
 		select {
 		case <-h.ctx.Done():
 			return
 
-		case <-ticker.C:
-
-			h.refresh()
-			h.render()
-			h.handleKeyhold()
+		case scale := <-frame:
+			h.refresh(scale)
+			h.render(scale)
+			h.handleKeyhold(scale)
 			h.handleMouseHeld()
 			h.handleTouchHeld()
 

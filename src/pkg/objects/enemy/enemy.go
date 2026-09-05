@@ -144,9 +144,9 @@ func (enemy Enemy) IsDestroyed() bool { return enemy.Level.HitPoints <= 0 }
 // The direction of the enemy is based on the position of the spaceship.
 // If the spaceship is below the enemy, the enemy moves towards the spaceship.
 // Otherwise, the enemy moves randomly.
-func (enemy *Enemy) Move(spaceshipPosition numeric.Position) {
+func (enemy *Enemy) Move(spaceshipPosition numeric.Position, scale numeric.Number) {
 	if enemy.kind == Tank {
-		enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, numeric.Number(enemy.Level.Speed))))
+		enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, numeric.Number(enemy.Level.Speed)*scale)))
 		return
 	}
 
@@ -163,19 +163,19 @@ func (enemy *Enemy) Move(spaceshipPosition numeric.Position) {
 	delta = delta.Add(numeric.Locate(
 		numeric.RandomRange(-0.5, 0.5), // Random number between -0.5 and 0.5
 		numeric.RandomRange(-1, 0),     // Random number between -1 and 0
-	)).Mul(strength)
+	)).Mul(strength * scale)
 
 	// Limit the speed of the enemy
-	if delta.Magnitude().Float() > config.Config.Enemy.MaximumSpeed {
-		delta = delta.Normalize().Mul(numeric.Number(config.Config.Enemy.MaximumSpeed))
+	if maximum := numeric.Number(config.Config.Enemy.MaximumSpeed) * scale; delta.Magnitude() > maximum {
+		delta = delta.Normalize().Mul(maximum)
 	}
 
 	// Move down using the speed
-	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, numeric.Number(enemy.Level.Speed))))
+	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, numeric.Number(enemy.Level.Speed)*scale)))
 
 	// Dash off screen if the spaceship is below the enemy and the enemy is close to the spaceship
 	if enemy.Geometry.Position().Y > spaceshipPosition.Y && enemy.Geometry.Position().Sub(spaceshipPosition).X.Abs() < enemy.Geometry.Size().ToVector().Magnitude() {
-		delta.Y = numeric.Number(config.Config.Enemy.MaximumSpeed)
+		delta.Y = numeric.Number(config.Config.Enemy.MaximumSpeed) * scale
 	}
 
 	// Move horizontally and vertically towards the spaceship

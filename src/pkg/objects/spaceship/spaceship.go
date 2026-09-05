@@ -348,7 +348,10 @@ func (spaceship Spaceship) GetBulletDamage() int {
 func (spaceship *Spaceship) IsDestroyed() bool { return spaceship.Level.Progress == 0 }
 
 // Move moves the spaceship in the specified direction.
-func (spaceship *Spaceship) Move(direction Direction) {
+// The scale is how far the frame advances the simulation, expressed in nominal
+// frames, so that the spaceship covers the same distance per second whatever the
+// refresh rate happens to be.
+func (spaceship *Spaceship) Move(direction Direction, scale numeric.Number) {
 	if spaceship.ifFrozen() {
 		return
 	}
@@ -373,10 +376,10 @@ func (spaceship *Spaceship) Move(direction Direction) {
 	switch direction {
 	case Up, Down:
 		spaceship.Directions.SetVertical(direction)
-		spaceship.Speed.Y += spaceship.Level.AccelerateRate
+		spaceship.Speed.Y += spaceship.Level.AccelerateRate * scale
 	case Left, Right:
 		spaceship.Directions.SetHorizontal(direction)
-		spaceship.Speed.X += spaceship.Level.AccelerateRate
+		spaceship.Speed.X += spaceship.Level.AccelerateRate * scale
 	}
 
 	// Limit the speed of the spaceship
@@ -390,7 +393,7 @@ func (spaceship *Spaceship) Move(direction Direction) {
 		Right: numeric.Locate(spaceship.Speed.X, 0),
 		Up:    numeric.Locate(0, -spaceship.Speed.Y),
 		Down:  numeric.Locate(0, spaceship.Speed.Y),
-	}[direction]))
+	}[direction].Mul(scale)))
 	spaceship.FixPosition()
 
 	go config.PlayAudio("spaceship_acceleration.wav", false)
@@ -400,23 +403,23 @@ func (spaceship *Spaceship) Move(direction Direction) {
 // The spaceship's position is updated based on the spaceship's speed.
 // If the spaceship's position is greater than the canvas height,
 // it is set to the canvas height.
-func (spaceship *Spaceship) MoveDown() { spaceship.Move(Down) }
+func (spaceship *Spaceship) MoveDown(scale numeric.Number) { spaceship.Move(Down, scale) }
 
 // MoveLeft moves the spaceship to the left.
 // The spaceship's position is updated based on the spaceship's speed.
 // If the spaceship's position is less than 0, it is set to 0.
-func (spaceship *Spaceship) MoveLeft() { spaceship.Move(Left) }
+func (spaceship *Spaceship) MoveLeft(scale numeric.Number) { spaceship.Move(Left, scale) }
 
 // MoveRight moves the spaceship to the right.
 // The spaceship's position is updated based on the spaceship's speed.
 // If the spaceship's position is greater than the canvas width,
 // it is set to the canvas width.
-func (spaceship *Spaceship) MoveRight() { spaceship.Move(Right) }
+func (spaceship *Spaceship) MoveRight(scale numeric.Number) { spaceship.Move(Right, scale) }
 
 // MoveUp moves the spaceship up.
 // The spaceship's position is updated based on the spaceship's speed.
 // If the spaceship's position is less than 0, it is set to 0.
-func (spaceship *Spaceship) MoveUp() { spaceship.Move(Up) }
+func (spaceship *Spaceship) MoveUp(scale numeric.Number) { spaceship.Move(Up, scale) }
 
 // MoveTo moves the spaceship to the specified position.
 // The spaceship's position is updated based on the delta.
@@ -426,13 +429,13 @@ func (spaceship *Spaceship) MoveUp() { spaceship.Move(Up) }
 // If the spaceship's position is less than 0, it is set to 0.
 // If the spaceship's position is greater than the canvas height,
 // it is set to the canvas height.
-func (spaceship *Spaceship) MoveTo(target numeric.Position) {
+func (spaceship *Spaceship) MoveTo(target numeric.Position, scale numeric.Number) {
 	if spaceship.ifFrozen() {
 		return
 	}
 
 	// Accelerate the spaceship
-	spaceship.Speed = spaceship.Speed.AddN(spaceship.Level.AccelerateRate)
+	spaceship.Speed = spaceship.Speed.AddN(spaceship.Level.AccelerateRate * scale)
 
 	// Limit the speed of the spaceship
 	if spaceship.Speed.Magnitude().Float() > config.Config.Spaceship.MaximumSpeed {
@@ -458,7 +461,7 @@ func (spaceship *Spaceship) MoveTo(target numeric.Position) {
 	}
 
 	// Update the spaceship position
-	spaceship.Geometry.SetPosition(spaceship.Geometry.Position().Sub(delta))
+	spaceship.Geometry.SetPosition(spaceship.Geometry.Position().Sub(delta.Mul(scale)))
 
 	// Fix the spaceship position
 	spaceship.FixPosition()
@@ -526,7 +529,7 @@ func (spaceship Spaceship) String() string {
 // UpdateState updates the state of the spaceship.
 // If the time since the last state transition is greater than
 // the spaceship state duration, the spaceship's state is set to Neutral.
-func (spaceship *Spaceship) UpdateState() {
+func (spaceship *Spaceship) UpdateState(scale numeric.Number) {
 	if time.Since(spaceship.lastStateTransition) < spaceship.state.GetDuration() {
 		return
 	}

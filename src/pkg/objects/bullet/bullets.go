@@ -13,7 +13,9 @@ func (bullets *Bullets) Reload(position numeric.Position, damage int, skew, spee
 
 // Update updates the bullets.
 // It moves the bullets and removes the ones that are out of the screen.
-func (bullets *Bullets) Update() {
+// The scale is how far the frame advances the simulation, expressed in nominal
+// frames.
+func (bullets *Bullets) Update(scale numeric.Number) {
 	var visibleBullets []Bullet
 	for i := range *bullets {
 		bullet := &(*bullets)[i]
@@ -22,7 +24,7 @@ func (bullets *Bullets) Update() {
 			continue
 		}
 
-		bullet.Move()
+		bullet.Move(scale)
 		if bullet.Position.Y < 0 {
 			continue
 		}
