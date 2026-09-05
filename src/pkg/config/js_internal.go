@@ -55,12 +55,18 @@ var (
 	eventLogChannel        = document.Call("getElementById", eventLogChannelID)
 	eventLogChannelBtn     = document.Call("getElementById", eventLogChannelButtonID)
 	fpsDiv                 = document.Call("getElementById", "fps")
+	hudCannonsSpan         = document.Call("getElementById", "hudCannons")
+	hudExperienceBar       = document.Call("getElementById", "hudExperience")
+	hudLevelSpan           = document.Call("getElementById", "hudLevel")
+	hudScoreSpan           = document.Call("getElementById", "hudScore")
+	hudShieldPips          = document.Call("getElementById", "hudShield")
 	infoLogChannel         = document.Call("getElementById", infoLogChannelID)
 	infoLogChannelBtn      = document.Call("getElementById", infoLogChannelButtonID)
 	invisibleCanvas        = document.Call("createElement", "canvas")
 	invisibleCtx           = invisibleCanvas.Call("getContext", "2d")
 	invisibleCanvasScrollY = 0.0
 	messageBox             = document.Call("getElementById", messageBoxID)
+	lastHUD                HUD
 	lastLogSentTime        = make(map[string]time.Time)
 	lastLogSentMutex       = sync.Mutex{}
 	scoreBoard             []score
@@ -127,6 +133,18 @@ func (e logEvent) ChannelButton() js.Value {
 	return map[logEvent]js.Value{true: eventLogChannelBtn, false: infoLogChannelBtn}[e]
 }
 
+// HUD carries the values the on-screen display shows.
+// The player used to have to read the scrolling message log to learn their own
+// score, and the only number permanently on screen was the frame rate.
+type HUD struct {
+	Score          int
+	Level          int
+	Cannons        int
+	ShieldCharge   int
+	ShieldCapacity int
+	Experience     float64 // Progress towards the next level, from 0 to 1
+}
+
 // score represents a score.
 type score struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -146,6 +164,12 @@ func init() {
 
 	// Warm the decoded audio cache before the game starts
 	preloadAudio()
+
+	// The frame rate is a diagnostic, not something the player needs, so it only
+	// appears when debugging is switched on.
+	if Config.Control.Debug.Get() {
+		fpsDiv.Set("hidden", false)
+	}
 
 	// Detach the watchdogs
 	envCallback(1)

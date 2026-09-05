@@ -15,6 +15,16 @@ type dimensions struct {
 	ScaleWidth, ScaleHeight              float64
 }
 
+// HUD carries the values the on-screen display shows.
+type HUD struct {
+	Score          int
+	Level          int
+	Cannons        int
+	ShieldCharge   int
+	ShieldCapacity int
+	Experience     float64 // Progress towards the next level, from 0 to 1
+}
+
 type score struct {
 	Name  string `json:"name"`
 	Score int    `json:"score"`
@@ -98,3 +108,5 @@ func Unsetenv(key string) {
 }
 
 func UpdateFPS(fps float64) {}
+
+func UpdateHUD(state HUD) {}

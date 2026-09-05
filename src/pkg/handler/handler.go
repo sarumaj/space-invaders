@@ -822,6 +822,15 @@ func (h *handler) render(scale numeric.Number) {
 	}
 
 	h.draw(scale)
+
+	config.UpdateHUD(config.HUD{
+		Score:          h.spaceship.Level.HighScore,
+		Level:          h.spaceship.Level.Progress,
+		Cannons:        h.spaceship.Level.Cannons,
+		ShieldCharge:   h.spaceship.Level.Shield.Charge,
+		ShieldCapacity: h.spaceship.Level.Shield.Capacity,
+		Experience:     h.spaceship.Level.ExperienceRatio(),
+	})
 }
 
 // refresh refreshes the game state.

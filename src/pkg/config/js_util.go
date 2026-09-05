@@ -693,6 +693,47 @@ func Unsetenv(key string) {
 	invalidateEnvCache()
 }
 
+// UpdateHUD refreshes the on-screen display.
+// Only the values that changed are written back, because touching the DOM on
+// every frame for numbers that change a few times a minute would undo the point
+// of having a heads-up display at all.
+func UpdateHUD(state HUD) {
+	if state == lastHUD {
+		return
+	}
+
+	if state.Score != lastHUD.Score {
+		hudScoreSpan.Set("textContent", state.Score)
+	}
+
+	if state.Level != lastHUD.Level {
+		hudLevelSpan.Set("textContent", state.Level)
+	}
+
+	if state.Cannons != lastHUD.Cannons {
+		hudCannonsSpan.Set("textContent", state.Cannons)
+	}
+
+	if state.Experience != lastHUD.Experience {
+		hudExperienceBar.Get("style").Set("width", fmt.Sprintf("%.1f%%", state.Experience*100))
+	}
+
+	if state.ShieldCharge != lastHUD.ShieldCharge || state.ShieldCapacity != lastHUD.ShieldCapacity {
+		var pips string
+		for i := 0; i < state.ShieldCapacity; i++ {
+			if i < state.ShieldCharge {
+				pips += `<i class="charged"></i>`
+				continue
+			}
+
+			pips += "<i></i>"
+		}
+		hudShieldPips.Set("innerHTML", pips)
+	}
+
+	lastHUD = state
+}
+
 // UpdateFPS is a function that updates the frames per second.
 func UpdateFPS(fps float64) {
 	fpsDiv.Set("innerHTML", fmt.Sprintf(fpsDiv.Call("getAttribute", "data-format").String(), fps))
