@@ -69,21 +69,28 @@ type config struct {
 
 	Enemy struct {
 		AccelerationProgress      float64
+		BulletDamage              int
+		ChargeSpeed               float64
 		Count                     int
 		CountProgressStep         int
 		BerserkLikeliness         float64
 		BerserkLikelinessProgress float64
 		DefaultPenalty            int
 		DefenseProgress           int
+		FireCooldown              time.Duration
+		FireLikeliness            float64
 		Height                    float64
 		HitpointProgress          int
 		InitialDefense            int
 		InitialHitpoints          int
 		InitialSpeed              float64
+		LurkSpeed                 float64
 		MaximumCount              int
 		MaximumSpeed              float64
+		PhaseRate                 float64
 		Regenerate                *bool
 		SpecialtyLikeliness       float64
+		StrafeAmplitude           float64
 		Width                     float64
 		YetAgainAmplifier         float64
 

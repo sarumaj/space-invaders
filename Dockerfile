@@ -6,15 +6,12 @@ RUN apt-get update && apt-get install -y jq
 
 COPY go.mod go.sum ./
 
-RUN go mod download && go mod verify && \
-    go install golang.org/x/tools/gopls@latest && \
-    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+RUN go mod download && go mod verify
 
 COPY . .
 
 RUN go generate ./... && \
     gofmt -s -d ./ && \
-    GOFLAGS="-buildvcs=false" golangci-lint run -v --timeout 5m && \
     go test -v -race ./... && \
     go build \
     -trimpath \

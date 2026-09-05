@@ -22,8 +22,54 @@ const (
 	Overlord                     // Overlord is the enemy type that can harm the player's spaceship more than the bulwark enemy
 )
 
+const (
+	Chaser  Behaviour = iota // Chaser homes in on the spaceship.
+	Drifter                  // Drifter holds its line and ignores the spaceship.
+	Strafer                  // Strafer sweeps sideways as it descends.
+	Charger                  // Charger commits to the spaceship's column and keeps closing.
+	Lurker                   // Lurker hangs back, edges closer and is hard to see.
+)
+
+// Behaviour represents how an enemy type moves.
+type Behaviour int
+
 // EnemyType represents the type of the enemy (Normal, Tank, Freezer, Berserker, Annihilator, ...)
 type EnemyType int
+
+// Armed reports whether the enemy type shoots back.
+// The lighter types do not, so that the opening minutes stay about dodging, and
+// the roster escalates into a firefight rather than starting as one.
+func (enemyType EnemyType) Armed() bool {
+	switch enemyType {
+	case Normal, Tank:
+		return false
+
+	default:
+		return true
+	}
+}
+
+// GetBehaviour returns the movement behaviour of the enemy type.
+func (enemyType EnemyType) GetBehaviour() Behaviour {
+	b, ok := map[EnemyType]Behaviour{
+		Tank:        Drifter,
+		Freezer:     Strafer,
+		Cloaked:     Lurker,
+		Berserker:   Charger,
+		Juggernaut:  Charger,
+		Dreadnought: Strafer,
+		Behemoth:    Drifter,
+		Leviathan:   Strafer,
+		Bulwark:     Drifter,
+		Overlord:    Charger,
+	}[enemyType]
+
+	if !ok {
+		return Chaser
+	}
+
+	return b
+}
 
 // AnyOf returns true if the enemy type is any of the given types.
 func (enemyType EnemyType) AnyOf(types ...EnemyType) bool {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/numeric"
+	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/bullet"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/enemy"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/planet"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/spaceship"
@@ -14,19 +15,20 @@ import (
 
 // handler is the game handler.
 type handler struct {
-	ctx        context.Context      // ctx is an abortable context of the handler
-	cancel     context.CancelFunc   // cancel is the cancel function of the handler
-	enemies    enemy.Enemies        // enemies is the list of enemies
-	keyEvent   chan keyEvent        // keyupEvent is the channel for key events
-	keysHeld   map[action]bool      // keysHeld is the set of actions whose key is currently down
-	mouseEvent chan mouseEvent      // mouseEvent is the channel for mouse events
-	mouseHeld  map[mouseButton]bool // mouseHeld is the map of mouse buttons held
-	once       sync.Once            // once is meant to register the keydown event only once
-	planet     *planet.Planet       // planet is the planet to be drawn
-	spaceship  *spaceship.Spaceship // spaceship is the player's spaceship
-	stars      star.Stars           // stars is the list of stars
-	touchEvent chan touchEvent      // touchEvent is the channel for touch events
-	touchHeld  bool                 // touchHeld is the flag to indicate if the touch is held
+	ctx          context.Context      // ctx is an abortable context of the handler
+	cancel       context.CancelFunc   // cancel is the cancel function of the handler
+	enemies      enemy.Enemies        // enemies is the list of enemies
+	enemyBullets bullet.Bullets       // enemyBullets are the bullets fired by the enemies; they live here because the bullet package already depends on the enemy package
+	keyEvent     chan keyEvent        // keyupEvent is the channel for key events
+	keysHeld     map[action]bool      // keysHeld is the set of actions whose key is currently down
+	mouseEvent   chan mouseEvent      // mouseEvent is the channel for mouse events
+	mouseHeld    map[mouseButton]bool // mouseHeld is the map of mouse buttons held
+	once         sync.Once            // once is meant to register the keydown event only once
+	planet       *planet.Planet       // planet is the planet to be drawn
+	spaceship    *spaceship.Spaceship // spaceship is the player's spaceship
+	stars        star.Stars           // stars is the list of stars
+	touchEvent   chan touchEvent      // touchEvent is the channel for touch events
+	touchHeld    bool                 // touchHeld is the flag to indicate if the touch is held
 }
 
 // applyGravityOnEnemies applies gravity to the enemies.
@@ -575,6 +577,10 @@ func (h *handler) draw(scale numeric.Number) {
 	for _, b := range h.spaceship.Bullets {
 		b.Draw()
 	}
+
+	for _, b := range h.enemyBullets {
+		b.Draw()
+	}
 }
 
 // handleKeyEvent handles the key event.
@@ -862,12 +868,66 @@ func (h *handler) refresh(scale numeric.Number) {
 
 	// Update the positions of the bullets.
 	h.spaceship.Bullets.Update(scale)
+	h.enemyBullets.Update(scale)
+
+	// Let the armed enemies return fire.
+	h.fireEnemyCannons()
 
 	// Apply the impact of the planet on the system.
 	h.applyPlanetImpact()
 
 	// Check the collisions.
 	h.checkCollisions()
+	h.checkEnemyFire()
+}
+
+// fireEnemyCannons lets every armed enemy take its shot.
+// The bullets are held by the handler rather than by the enemies: the bullet
+// package resolves collisions against enemies, so an enemy owning its own bullets
+// would close an import cycle.
+func (h *handler) fireEnemyCannons() {
+	for i := range h.enemies {
+		origin, damage, fired := h.enemies[i].FireCannon()
+		if !fired {
+			continue
+		}
+
+		h.enemyBullets.ReloadHostile(origin, damage, 0, h.enemies[i].Level.Speed)
+	}
+}
+
+// checkEnemyFire applies the damage of the enemy bullets that reached the spaceship.
+func (h *handler) checkEnemyFire() {
+	for i := range h.enemyBullets {
+		if h.enemyBullets[i].Exhausted || !h.enemyBullets[i].HasHitSpaceship(h.spaceship.Geometry.Position(), h.spaceship.Geometry.Size()) {
+			continue
+		}
+
+		h.enemyBullets[i].Exhaust()
+
+		// A shot costs the spaceship a level, exactly as a collision does, so the
+		// shield stays the thing that absorbs it.
+		if !h.spaceship.Penalize(1) {
+			continue
+		}
+
+		config.SendMessageThrottled("spaceship_shot",
+			config.Execute(config.Config.MessageBox.Messages.SpaceshipDowngradedByEnemy, config.Template{
+				"SpaceshipLevel": h.spaceship.Level.Progress,
+			}), false, true, config.Config.MessageBox.ChannelLogThrottling)
+
+		if h.spaceship.IsDestroyed() {
+			config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GameOver, config.Template{
+				"DiscoveredPlanets": h.spaceship.Discovered(),
+				"HighScore":         h.spaceship.Level.HighScore,
+				"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
+				"TopScores":         config.GetScores(10),
+			}), false, false)
+			h.pause()
+			h.cancel()
+			return
+		}
+	}
 }
 
 // start starts the game if not already started.
@@ -983,6 +1043,7 @@ func (h *handler) Loop() {
 func (h *handler) Restart() {
 	h.spaceship = spaceship.Embark(h.spaceship.Commandant)
 	h.enemies = nil
+	h.enemyBullets = nil
 	h.stars = star.Explode(config.Config.Star.Count)
 	h.planet = planet.Reveal(true, true)
 	h.ctx, h.cancel = context.WithCancel(context.Background())
