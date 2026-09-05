@@ -20,6 +20,7 @@ type Enemy struct {
 	Level               *EnemyLevel               // Level is the level of the enemy.
 	kind                EnemyType                 // Type is the type of the enemy.
 	phase               numeric.Number            // Phase is the position within the enemy's own movement cycle, in radians.
+	flash               numeric.Number            // Flash is how much of the hit highlight is still showing, from 1 down to 0.
 	lastFired           time.Time                 // Last time the enemy fired its cannon.
 }
 
@@ -113,14 +114,15 @@ func (enemy *Enemy) Draw() {
 	enemy.Color.Interpolate()
 	enemy.Geometry.Interpolate()
 
-	config.DrawSpaceship(
+	config.DrawEnemy(
 		enemy.Geometry.Position().Pack(),
 		enemy.Geometry.Size().Pack(),
-		enemy.kind == Tank, // Face up if the enemy is a tank
+		enemy.kind.GetShape(),
 		enemy.kind.GetColor().FormatRGBA(),
 		label,
 		statusValues,
 		statusColors,
+		enemy.flash.Float(),
 	)
 }
 
@@ -133,10 +135,16 @@ func (enemy *Enemy) Hit(damage int) int {
 
 	enemy.Level.HitPointsLoss += damage
 	enemy.Level.HitPoints -= damage
+	enemy.flash = 1 // Light the enemy up so the hit is visible, not only audible.
 
 	go config.PlayAudio("enemy_hit.wav", false)
 
 	return damage
+}
+
+// FadeFlash decays the highlight left by the last hit.
+func (enemy *Enemy) FadeFlash(scale numeric.Number) {
+	enemy.flash = (enemy.flash - numeric.Number(config.Config.Enemy.FlashDecay)*scale).Clamp(0, 1)
 }
 
 // IsDestroyed returns true if the enemy is destroyed.

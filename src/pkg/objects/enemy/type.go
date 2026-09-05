@@ -83,20 +83,23 @@ func (enemyType EnemyType) AnyOf(types ...EnemyType) bool {
 }
 
 // GetColor returns the color of the enemy based on its type.
+// The heavier half of the roster used to be painted in near-black hues, which on
+// a black starfield made the most dangerous enemies the hardest ones to see. The
+// palette below keeps the same associations but at a luminance that reads.
 func (enemyType EnemyType) GetColor() graphics.Color {
 	c, ok := map[EnemyType]graphics.Color{
 		Tank:        graphics.Catalogue().Chartreuse(),
 		Freezer:     graphics.Catalogue().DeepSkyBlue(),
-		Cloaked:     graphics.Catalogue().DarkSlateGray().SetA(0.6),
+		Cloaked:     graphics.Catalogue().SlateGray().SetA(0.7),
 		Berserker:   graphics.Catalogue().Crimson(),
-		Annihilator: graphics.Catalogue().MidnightBlue(),
+		Annihilator: graphics.Catalogue().RoyalBlue(),
 		Juggernaut:  graphics.Catalogue().DarkOrange(),
-		Dreadnought: graphics.Catalogue().DarkRed(),
-		Behemoth:    graphics.Catalogue().DarkGreen(),
-		Colossus:    graphics.Catalogue().DarkBlue(),
-		Leviathan:   graphics.Catalogue().DarkMagenta(),
-		Bulwark:     graphics.Catalogue().DarkCyan(),
-		Overlord:    graphics.Catalogue().DarkGoldenRod(),
+		Dreadnought: graphics.Catalogue().OrangeRed(),
+		Behemoth:    graphics.Catalogue().MediumSeaGreen(),
+		Colossus:    graphics.Catalogue().CornflowerBlue(),
+		Leviathan:   graphics.Catalogue().Orchid(),
+		Bulwark:     graphics.Catalogue().Turquoise(),
+		Overlord:    graphics.Catalogue().Gold(),
 	}[enemyType]
 
 	if !ok {
@@ -104,6 +107,30 @@ func (enemyType EnemyType) GetColor() graphics.Color {
 	}
 
 	return c
+}
+
+// GetShape returns the hull the enemy type is drawn with.
+func (enemyType EnemyType) GetShape() string {
+	s, ok := map[EnemyType]string{
+		Tank:        config.ShapeChevron,
+		Freezer:     config.ShapePrism,
+		Cloaked:     config.ShapePhantom,
+		Berserker:   config.ShapeSpike,
+		Annihilator: config.ShapeHexpod,
+		Juggernaut:  config.ShapeRam,
+		Dreadnought: config.ShapeDagger,
+		Behemoth:    config.ShapeFortress,
+		Colossus:    config.ShapeSaucer,
+		Leviathan:   config.ShapeTrident,
+		Bulwark:     config.ShapeFortress,
+		Overlord:    config.ShapeCrown,
+	}[enemyType]
+
+	if !ok {
+		return config.ShapeArrow
+	}
+
+	return s
 }
 
 // GetDefenseBoost returns the defense boost of the enemy based on its type.

@@ -79,6 +79,7 @@ type config struct {
 		DefenseProgress           int
 		FireCooldown              time.Duration
 		FireLikeliness            float64
+		FlashDecay                float64
 		Height                    float64
 		HitpointProgress          int
 		InitialDefense            int

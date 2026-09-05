@@ -56,6 +56,24 @@ func DrawPlanetUranus(coords [2]float64, radius float64)                        
 func DrawPlanetVenus(coords [2]float64, radius float64)                               {}
 func DrawRect(coords [2]float64, size [2]float64, color string, cornerRadius float64) {}
 
+const (
+	ShapeArrow    = "arrow"
+	ShapeChevron  = "chevron"
+	ShapeCrown    = "crown"
+	ShapeDagger   = "dagger"
+	ShapeFortress = "fortress"
+	ShapeHexpod   = "hexpod"
+	ShapePhantom  = "phantom"
+	ShapePrism    = "prism"
+	ShapeRam      = "ram"
+	ShapeSaucer   = "saucer"
+	ShapeSpike    = "spike"
+	ShapeTrident  = "trident"
+)
+
+func DrawEnemy(coords [2]float64, size [2]float64, shape, color, label string, statusValues []float64, statusColors []string, flash float64) {
+}
+
 func DrawSpaceship(coors [2]float64, size [2]float64, faceUp bool, color, label string, statusValues []float64, statusColors []string) {
 }
 

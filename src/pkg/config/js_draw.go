@@ -893,39 +893,49 @@ func DrawSpaceship(coors [2]float64, size [2]float64, faceUp bool, color, label 
 	canvasObjectContext.Call("fill")
 	canvasObjectContext.Call("stroke")
 
-	// Draw the label above or below the spaceship
-	if label != "" {
-		canvasObjectContext.Set("font", "16px Arial") // Set font
+	drawObjectLabel(x, y, width, height, faceUp, color, label)
+	drawStatusArcs(x, y, width, height, faceUp, statusValues, statusColors)
+}
 
-		// Shorten the label if it is too long.
-		// Commandant names come from a browser prompt, so the label can hold
-		// multi-byte runes that a byte slice would cut in half.
-		if runes := []rune(label); len(runes) > Config.Spaceship.MaximumLabelLength {
-			label = string(runes[:Config.Spaceship.MaximumLabelLength-3]) + "..."
-		}
-
-		// Measure the width of the label text
-		textMetrics := canvasObjectContext.Call("measureText", label)
-		labelWidth := textMetrics.Get("width").Float()
-
-		labelX := x + (width-labelWidth)/2 // Center the label horizontally
-
-		var labelY float64
-		if faceUp {
-			labelY = y + height + 10 // Below the spaceship
-		} else {
-			labelY = y - 5 // Above the spaceship
-		}
-
-		// Draw the label text with a black stroke and fill
-		canvasObjectContext.Set("strokeStyle", "black")
-		canvasObjectContext.Call("strokeText", label, labelX, labelY)
-
-		canvasObjectContext.Set("fillStyle", color) // Set text color
-		canvasObjectContext.Call("fillText", label, labelX, labelY)
+// drawObjectLabel writes the name of an object above it, or below it when the
+// object faces up.
+func drawObjectLabel(x, y, width, height float64, faceUp bool, color, label string) {
+	if label == "" {
+		return
 	}
 
-	// Draw the status bars
+	canvasObjectContext.Set("font", "16px Arial") // Set font
+
+	// Shorten the label if it is too long.
+	// Commandant names come from a browser prompt, so the label can hold
+	// multi-byte runes that a byte slice would cut in half.
+	if runes := []rune(label); len(runes) > Config.Spaceship.MaximumLabelLength {
+		label = string(runes[:Config.Spaceship.MaximumLabelLength-3]) + "..."
+	}
+
+	// Measure the width of the label text
+	textMetrics := canvasObjectContext.Call("measureText", label)
+	labelWidth := textMetrics.Get("width").Float()
+
+	labelX := x + (width-labelWidth)/2 // Center the label horizontally
+
+	var labelY float64
+	if faceUp {
+		labelY = y + height + 10 // Below the object
+	} else {
+		labelY = y - 5 // Above the object
+	}
+
+	// Draw the label text with a black stroke and fill
+	canvasObjectContext.Set("strokeStyle", "black")
+	canvasObjectContext.Call("strokeText", label, labelX, labelY)
+
+	canvasObjectContext.Set("fillStyle", color) // Set text color
+	canvasObjectContext.Call("fillText", label, labelX, labelY)
+}
+
+// drawStatusArcs draws the status bars of an object as arcs around its nose.
+func drawStatusArcs(x, y, width, height float64, faceUp bool, statusValues []float64, statusColors []string) {
 	for i := 0; i < len(statusColors) && i < len(statusValues); i++ {
 		canvasObjectContext.Call("beginPath")
 		arcRadius := (width+height)/4 + 5 + float64(7*i) // Radius of the status arc

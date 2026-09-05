@@ -78,6 +78,7 @@ func (enemies *Enemies) Update(spaceshipPosition numeric.Position, scale numeric
 		}
 
 		enemy.Move(spaceshipPosition, scale)
+		enemy.FadeFlash(scale)
 		if enemy.Geometry.Position().Y.Float() >= canvasDimensions.OriginalHeight {
 			newEnemy := Challenge(enemy.Name, false)
 			newEnemy.ToProgressLevel(enemy.Level.Progress)
