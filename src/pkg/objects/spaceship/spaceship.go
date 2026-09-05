@@ -38,7 +38,7 @@ type Spaceship struct {
 // The message is throttled based on the log throttling duration.
 func (spaceship *Spaceship) ifFrozen() bool {
 	if spaceship.state == Frozen {
-		config.SendMessageThrottled(
+		config.SendMessageThrottled("spaceship_frozen",
 			config.Execute(config.Config.MessageBox.Messages.SpaceshipStillFrozen,
 				config.Template{
 					"FreezeDuration": time.Until(spaceship.lastStateTransition.

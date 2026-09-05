@@ -69,15 +69,17 @@ func LogError(err error) {
 	}
 }
 
-func MakeObject(m map[string]any) any                                            { return m }
-func NewInstance(typ string, args ...any) any                                    { return nil }
-func PlayAudio(name string, loop bool)                                           {}
-func SaveScores()                                                                {}
-func SendMessage(msg string, reset, event bool)                                  { log.Println(msg) }
-func SendMessageThrottled(msg string, reset, event bool, cooldown time.Duration) { log.Println(msg) }
-func SetScore(name string, score int) (rank int)                                 { return }
-func StopAudio(name string)                                                      {}
-func StopAudioSources(selector func(name string) bool)                           {}
+func MakeObject(m map[string]any) any           { return m }
+func NewInstance(typ string, args ...any) any   { return nil }
+func PlayAudio(name string, loop bool)          {}
+func SaveScores()                               {}
+func SendMessage(msg string, reset, event bool) { log.Println(msg) }
+func SendMessageThrottled(topic, msg string, reset, event bool, cooldown time.Duration) {
+	log.Println(msg)
+}
+func SetScore(name string, score int) (rank int)       { return }
+func StopAudio(name string)                            {}
+func StopAudioSources(selector func(name string) bool) {}
 
 func Setenv(key, value string) {
 	_ = os.Setenv(key, value)

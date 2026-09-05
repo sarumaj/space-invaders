@@ -541,26 +541,31 @@ func SendMessage(msg string, reset, event logEvent) {
 		return // Already active, nothing to do
 	}
 
-	// Flash the channel
+	// Flash the channel.
+	// The listener is created once per channel in setupMessageBoxInterface and
+	// re-registered here: allocating a js.FuncOf per message leaked one entry of
+	// the global callback registry for every enemy hit, and only Release frees
+	// them. Registering the same function twice is a no-op, so the "once" option
+	// still leaves exactly one listener attached.
 	channelBtn.Get("classList").Call("add", tabFlashClass)
-	channelBtn.Call("addEventListener", "animationend", js.FuncOf(func(this js.Value, _ []js.Value) any {
-		this.Get("classList").Call("remove", tabFlashClass)
-		if !event { // If not event log, activate the tab
-			this.Get("classList").Call("add", tabActiveClass)
-			this.Call("click")
-		}
-		return nil
-	}), js.ValueOf(map[string]any{"once": true}))
+	channelBtn.Call("addEventListener", "animationend", flashEndCallbacks[event], flashEndOptions)
 }
 
 // SendMessageThrottled sends a message to the message box with a cooldown.
-func SendMessageThrottled(msg string, reset, event logEvent, cooldown time.Duration) {
-	if !lastLogSentTime.IsZero() && time.Since(lastLogSentTime) < cooldown {
+// The cooldown is tracked per topic so that a chatty message cannot suppress an
+// unrelated one, which a single shared timestamp used to do.
+func SendMessageThrottled(topic string, msg string, reset, event logEvent, cooldown time.Duration) {
+	lastLogSentMutex.Lock()
+	last, seen := lastLogSentTime[topic]
+	if seen && time.Since(last) < cooldown {
+		lastLogSentMutex.Unlock()
 		return
 	}
 
+	lastLogSentTime[topic] = time.Now()
+	lastLogSentMutex.Unlock()
+
 	SendMessage(msg, reset, event)
-	lastLogSentTime = time.Now()
 }
 
 // Setenv is a function that sets the environment variable key to value.

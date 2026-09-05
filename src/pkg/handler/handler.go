@@ -505,11 +505,16 @@ func (h *handler) checkCollisions() {
 			}
 
 			h.spaceship.Bullets[i].Exhaust() // Exhaust the bullet.
-			config.SendMessage(config.Execute(config.Config.MessageBox.Messages.EnemyHit, config.Template{
-				"EnemyName": e.Name,
-				"EnemyType": e.Type(),
-				"Damage":    damage,
-			}), false, true)
+
+			// Throttled: with eight cannons on an 85ms cooldown this fires about
+			// ninety times a second, and every message reparses HTML and restarts
+			// a smooth scroll, which drowns the log and stalls the frame.
+			config.SendMessageThrottled("enemy_hit",
+				config.Execute(config.Config.MessageBox.Messages.EnemyHit, config.Template{
+					"EnemyName": e.Name,
+					"EnemyType": e.Type(),
+					"Damage":    damage,
+				}), false, true, config.Config.MessageBox.ChannelLogThrottling)
 
 			// If the enemy has no health points, upgrade the spaceship.
 			if h.enemies[j].IsDestroyed() && h.spaceship.Level.GainExperience(e) {
