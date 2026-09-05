@@ -849,9 +849,11 @@ func DrawSpaceship(coors [2]float64, size [2]float64, faceUp bool, color, label 
 	if label != "" {
 		canvasObjectContext.Set("font", "16px Arial") // Set font
 
-		// Shorten the label if it is too long
-		if len(label) > Config.Spaceship.MaximumLabelLength {
-			label = fmt.Sprintf("%s...", label[:Config.Spaceship.MaximumLabelLength-3])
+		// Shorten the label if it is too long.
+		// Commandant names come from a browser prompt, so the label can hold
+		// multi-byte runes that a byte slice would cut in half.
+		if runes := []rune(label); len(runes) > Config.Spaceship.MaximumLabelLength {
+			label = string(runes[:Config.Spaceship.MaximumLabelLength-3]) + "..."
 		}
 
 		// Measure the width of the label text
