@@ -7,6 +7,7 @@ import (
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/numeric"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/bullet"
+	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/effect"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/enemy"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/planet"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/objects/spaceship"
@@ -19,6 +20,7 @@ type handler struct {
 	cancel       context.CancelFunc   // cancel is the cancel function of the handler
 	enemies      enemy.Enemies        // enemies is the list of enemies
 	enemyBullets bullet.Bullets       // enemyBullets are the bullets fired by the enemies; they live here because the bullet package already depends on the enemy package
+	blasts       effect.Blasts        // blasts are the destruction animations currently playing
 	keyEvent     chan keyEvent        // keyupEvent is the channel for key events
 	keysHeld     map[action]bool      // keysHeld is the set of actions whose key is currently down
 	mouseEvent   chan mouseEvent      // mouseEvent is the channel for mouse events
@@ -581,6 +583,9 @@ func (h *handler) draw(scale numeric.Number) {
 	for _, b := range h.enemyBullets {
 		b.Draw()
 	}
+
+	// Draw the destruction animations last, so they read as being in front.
+	h.blasts.Draw()
 }
 
 // handleKeyEvent handles the key event.
@@ -879,6 +884,29 @@ func (h *handler) refresh(scale numeric.Number) {
 	// Check the collisions.
 	h.checkCollisions()
 	h.checkEnemyFire()
+
+	// Start a destruction animation for whatever died this frame, and age the
+	// ones already running.
+	h.collectBlasts()
+	h.blasts.Update(scale)
+}
+
+// collectBlasts starts a destruction animation for every enemy that died since
+// the last frame. Enemies are destroyed by collisions, by bullets and by the
+// black hole, so they are collected here rather than at each of those sites.
+func (h *handler) collectBlasts() {
+	for i := range h.enemies {
+		if !h.enemies[i].Detonate() {
+			continue
+		}
+
+		h.blasts.Detonate(
+			h.enemies[i].Geometry.Position().Add(h.enemies[i].Geometry.Size().Half().ToVector()),
+			h.enemies[i].Geometry.Size().ToVector().Magnitude()/2,
+			h.enemies[i].Type().GetBlast(),
+			h.enemies[i].Type().GetColor().FormatRGBA(),
+		)
+	}
 }
 
 // fireEnemyCannons lets every armed enemy take its shot.
@@ -1044,6 +1072,7 @@ func (h *handler) Restart() {
 	h.spaceship = spaceship.Embark(h.spaceship.Commandant)
 	h.enemies = nil
 	h.enemyBullets = nil
+	h.blasts = nil
 	h.stars = star.Explode(config.Config.Star.Count)
 	h.planet = planet.Reveal(true, true)
 	h.ctx, h.cancel = context.WithCancel(context.Background())

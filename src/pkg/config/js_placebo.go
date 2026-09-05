@@ -71,6 +71,17 @@ const (
 	ShapeTrident  = "trident"
 )
 
+const (
+	BlastBurst     = "burst"
+	BlastImplosion = "implosion"
+	BlastShatter   = "shatter"
+	BlastShockwave = "shockwave"
+	BlastSpiral    = "spiral"
+	BlastVaporize  = "vaporize"
+)
+
+func DrawBlast(coords [2]float64, radius float64, style, color string, progress, seed float64) {}
+
 func DrawEnemy(coords [2]float64, size [2]float64, shape, color, label string, statusValues []float64, statusColors []string, flash float64) {
 }
 

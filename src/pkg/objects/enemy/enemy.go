@@ -22,6 +22,21 @@ type Enemy struct {
 	phase               numeric.Number            // Phase is the position within the enemy's own movement cycle, in radians.
 	flash               numeric.Number            // Flash is how much of the hit highlight is still showing, from 1 down to 0.
 	lastFired           time.Time                 // Last time the enemy fired its cannon.
+	detonated           bool                      // Detonated is true once the destruction animation has been started for this enemy.
+}
+
+// Detonate reports whether the enemy has just been destroyed and its destruction
+// animation still has to be started, and records that it has been.
+// Enemies are destroyed from several places, so asking after the fact keeps the
+// animation from having to be spawned at each of them.
+func (enemy *Enemy) Detonate() bool {
+	if enemy.detonated || !enemy.IsDestroyed() {
+		return false
+	}
+
+	enemy.detonated = true
+
+	return true
 }
 
 // Area returns the area of the enemy.

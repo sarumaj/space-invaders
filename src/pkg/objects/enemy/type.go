@@ -109,6 +109,31 @@ func (enemyType EnemyType) GetColor() graphics.Color {
 	return c
 }
 
+// GetBlast returns the destruction animation of the enemy type, chosen to match
+// the hull that is coming apart.
+func (enemyType EnemyType) GetBlast() string {
+	b, ok := map[EnemyType]string{
+		Tank:        config.BlastVaporize,
+		Freezer:     config.BlastShatter,
+		Cloaked:     config.BlastVaporize,
+		Berserker:   config.BlastSpiral,
+		Annihilator: config.BlastImplosion,
+		Juggernaut:  config.BlastShockwave,
+		Dreadnought: config.BlastSpiral,
+		Behemoth:    config.BlastShockwave,
+		Colossus:    config.BlastImplosion,
+		Leviathan:   config.BlastShatter,
+		Bulwark:     config.BlastShockwave,
+		Overlord:    config.BlastShockwave,
+	}[enemyType]
+
+	if !ok {
+		return config.BlastBurst
+	}
+
+	return b
+}
+
 // GetShape returns the hull the enemy type is drawn with.
 func (enemyType EnemyType) GetShape() string {
 	s, ok := map[EnemyType]string{

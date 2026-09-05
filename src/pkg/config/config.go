@@ -67,6 +67,10 @@ type config struct {
 		SuspensionFrames                  int
 	}
 
+	Effect struct {
+		BlastDuration time.Duration
+	}
+
 	Enemy struct {
 		AccelerationProgress      float64
 		BulletDamage              int
