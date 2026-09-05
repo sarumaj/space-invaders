@@ -178,7 +178,7 @@ func (enemy *Enemy) Move(spaceshipPosition numeric.Position, scale numeric.Numbe
 	enemy.Geometry.SetPosition(enemy.Geometry.Position().Add(numeric.Locate(0, descent)))
 
 	var drift numeric.Position
-	switch enemy.kind.GetBehaviour() {
+	switch enemy.kind.GetBehavior() {
 	case Drifter:
 		// Holds its line and ignores the spaceship entirely.
 

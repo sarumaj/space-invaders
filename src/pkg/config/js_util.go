@@ -719,14 +719,11 @@ func UpdateHUD(state HUD) {
 	}
 
 	if state.ShieldCharge != lastHUD.ShieldCharge || state.ShieldCapacity != lastHUD.ShieldCapacity {
-		// Shield capacity grows by one on every level up and is never bounded, so
-		// past a handful of pips the row is summarised instead of drawn. Left
-		// unbounded it pushed the rest of the display off the canvas.
-		shown := min(state.ShieldCapacity, maximumShieldPips)
+		filled, shown := state.ShieldGauge()
 
 		var pips string
 		for i := 0; i < shown; i++ {
-			if i < state.ShieldCharge {
+			if i < filled {
 				pips += `<i class="charged"></i>`
 				continue
 			}
@@ -734,7 +731,9 @@ func UpdateHUD(state HUD) {
 			pips += "<i></i>"
 		}
 
-		if state.ShieldCapacity > shown {
+		// Once the pips stand for a proportion rather than for single charges,
+		// they cannot be counted, so the exact figures go next to them.
+		if state.ShieldSummarized() {
 			pips += fmt.Sprintf("<b>%d/%d</b>", state.ShieldCharge, state.ShieldCapacity)
 		}
 

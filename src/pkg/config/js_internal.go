@@ -13,10 +13,6 @@ import (
 	"time"
 )
 
-// maximumShieldPips is how many shield pips the display draws before it falls
-// back to a numeric summary.
-const maximumShieldPips = 8
-
 const (
 	originalWidth  = 800 // Original width of the drawable canvas area (px, after considering the padding and border of the surrounding containers)
 	originalHeight = 600 // Original height of the drawable canvas area (px, after considering the padding and border of the surrounding containers)
@@ -136,18 +132,6 @@ func (e logEvent) Channel() js.Value {
 // ChannelButton returns the channel button element.
 func (e logEvent) ChannelButton() js.Value {
 	return map[logEvent]js.Value{true: eventLogChannelBtn, false: infoLogChannelBtn}[e]
-}
-
-// HUD carries the values the on-screen display shows.
-// The player used to have to read the scrolling message log to learn their own
-// score, and the only number permanently on screen was the frame rate.
-type HUD struct {
-	Score          int
-	Level          int
-	Cannons        int
-	ShieldCharge   int
-	ShieldCapacity int
-	Experience     float64 // Progress towards the next level, from 0 to 1
 }
 
 // score represents a score.

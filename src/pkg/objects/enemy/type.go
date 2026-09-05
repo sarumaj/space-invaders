@@ -23,15 +23,15 @@ const (
 )
 
 const (
-	Chaser  Behaviour = iota // Chaser homes in on the spaceship.
-	Drifter                  // Drifter holds its line and ignores the spaceship.
-	Strafer                  // Strafer sweeps sideways as it descends.
-	Charger                  // Charger commits to the spaceship's column and keeps closing.
-	Lurker                   // Lurker hangs back, edges closer and is hard to see.
+	Chaser  Behavior = iota // Chaser homes in on the spaceship.
+	Drifter                 // Drifter holds its line and ignores the spaceship.
+	Strafer                 // Strafer sweeps sideways as it descends.
+	Charger                 // Charger commits to the spaceship's column and keeps closing.
+	Lurker                  // Lurker hangs back, edges closer and is hard to see.
 )
 
-// Behaviour represents how an enemy type moves.
-type Behaviour int
+// Behavior represents how an enemy type moves.
+type Behavior int
 
 // EnemyType represents the type of the enemy (Normal, Tank, Freezer, Berserker, Annihilator, ...)
 type EnemyType int
@@ -49,9 +49,9 @@ func (enemyType EnemyType) Armed() bool {
 	}
 }
 
-// GetBehaviour returns the movement behaviour of the enemy type.
-func (enemyType EnemyType) GetBehaviour() Behaviour {
-	b, ok := map[EnemyType]Behaviour{
+// GetBehavior returns the movement behavior of the enemy type.
+func (enemyType EnemyType) GetBehavior() Behavior {
+	b, ok := map[EnemyType]Behavior{
 		Tank:        Drifter,
 		Freezer:     Strafer,
 		Cloaked:     Lurker,
