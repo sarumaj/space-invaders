@@ -62,12 +62,15 @@ body {
 #gameContainer #canvasContainer #hud {
   position: absolute;
   top: 10px;
-  left: 10px;
-  right: 10px;
+  left: 12px;
+  right: 12px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  flex-wrap: nowrap; /* One line only: wrapping grew the HUD down over the play area */
+  gap: 12px;
   align-items: center;
+  box-sizing: border-box;
+  max-width: calc(100% - 24px);
+  overflow: hidden; /* Nothing inside the HUD may escape the canvas */
   color: #fff;
   font-family: "Courier New", Courier, monospace;
   font-size: 13px;
@@ -81,12 +84,22 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0; /* Let a flex item shrink below its content instead of overflowing */
+  flex: 0 0 auto;
+  overflow: hidden;
 }
 
+/* The experience bar is the one stat that takes up the slack in the row. */
 #gameContainer #canvasContainer #hud .hud-stat-wide {
-  flex: 1 1 90px;
-  min-width: 90px;
-  max-width: 160px;
+  flex: 1 1 80px;
+  min-width: 60px;
+  max-width: 150px;
+}
+
+/* The shield sizes to its pips, which the display already caps, so that the
+   summary it falls back to at high capacity is not clipped away. */
+#gameContainer #canvasContainer #hud .hud-stat-shield {
+  flex: 0 0 auto;
 }
 
 #gameContainer #canvasContainer #hud .hud-label {
@@ -119,10 +132,20 @@ body {
 
 #gameContainer #canvasContainer #hud .hud-pips {
   display: flex;
+  align-items: center;
   gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#gameContainer #canvasContainer #hud .hud-pips > b {
+  font-size: 10px;
+  font-weight: bold;
+  white-space: nowrap;
 }
 
 #gameContainer #canvasContainer #hud .hud-pips > i {
+  flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border: 1px solid rgba(255, 255, 255, 0.5);
