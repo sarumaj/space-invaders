@@ -67,6 +67,7 @@ const (
 	ShapePrism    = "prism"
 	ShapeRam      = "ram"
 	ShapeSaucer   = "saucer"
+	ShapeShield   = "shield"
 	ShapeSpike    = "spike"
 	ShapeTrident  = "trident"
 )

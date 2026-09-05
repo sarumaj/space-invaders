@@ -147,7 +147,7 @@ func (enemyType EnemyType) GetShape() string {
 		Behemoth:    config.ShapeFortress,
 		Colossus:    config.ShapeSaucer,
 		Leviathan:   config.ShapeTrident,
-		Bulwark:     config.ShapeFortress,
+		Bulwark:     config.ShapeShield,
 		Overlord:    config.ShapeCrown,
 	}[enemyType]
 

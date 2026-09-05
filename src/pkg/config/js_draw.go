@@ -938,7 +938,10 @@ func drawObjectLabel(x, y, width, height float64, faceUp bool, color, label stri
 func drawStatusArcs(x, y, width, height float64, faceUp bool, statusValues []float64, statusColors []string) {
 	for i := 0; i < len(statusColors) && i < len(statusValues); i++ {
 		canvasObjectContext.Call("beginPath")
-		arcRadius := (width+height)/4 + 5 + float64(7*i) // Radius of the status arc
+		// Radius of the status arc. It is kept close to the hull: at the previous
+		// radius the arcs floated well clear of the object and read as separate
+		// objects of their own rather than as its status.
+		arcRadius := math.Max(width, height)*0.32 + 4 + float64(6*i)
 
 		canvasObjectContext.Set("lineWidth", 5) // Set line width for the status arc
 

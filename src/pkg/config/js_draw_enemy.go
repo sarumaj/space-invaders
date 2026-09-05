@@ -13,23 +13,58 @@ import (
 // and several of those hues were near black against the starfield. Each type now
 // has an outline the player can recognise before reading its colour.
 const (
-	ShapeArrow    = "arrow"    // Rank and file: a small dart.
+	ShapeArrow    = "arrow"    // Rank and file: a compact fighter.
 	ShapeChevron  = "chevron"  // The goodie, drawn facing away from the player.
-	ShapeCrown    = "crown"    // A crowned capital ship.
-	ShapeDagger   = "dagger"   // A long blade with swept wings.
-	ShapeFortress = "fortress" // A blocky hull with turret notches.
-	ShapeHexpod   = "hexpod"   // A hexagon flanked by engine pods.
+	ShapeCrown    = "crown"    // A capital ship under a crown of spires.
+	ShapeDagger   = "dagger"   // A blade with wings swept back along it.
+	ShapeFortress = "fortress" // A blocky hull with turrets on its back.
+	ShapeHexpod   = "hexpod"   // A hexagon slung between two engine pods.
 	ShapePhantom  = "phantom"  // A hollow lozenge that barely registers.
 	ShapePrism    = "prism"    // A faceted crystal.
 	ShapeRam      = "ram"      // A heavy wedge behind a battering prow.
 	ShapeSaucer   = "saucer"   // A wide disc under a dome.
-	ShapeSpike    = "spike"    // Three forward spikes.
-	ShapeTrident  = "trident"  // Three prongs on a broad base.
+	ShapeShield   = "shield"   // A braced shield plate.
+	ShapeSpike    = "spike"    // A blunt head with three fangs.
+	ShapeTrident  = "trident"  // Three long prongs on a broad bar.
 )
 
-// fillPolygon fills the polygon through the given points and outlines it.
-// The outline is what keeps a dark hull legible against the starfield.
-func fillPolygon(points [][2]float64, color string) {
+// hullOutline is the colour every hull is outlined with, which is what keeps a
+// dark hull legible against the starfield.
+const hullOutline = "rgba(0, 0, 0, 0.85)"
+
+// parseRGBA splits a colour of the form "rgba(r, g, b, a)" into its components.
+// Enemy colours reach the painters in exactly that form, from Color.FormatRGBA.
+func parseRGBA(color string) (r, g, b int, a float64, ok bool) {
+	if _, err := fmt.Sscanf(color, "rgba(%d, %d, %d, %f)", &r, &g, &b, &a); err != nil {
+		return 255, 255, 255, 1, false
+	}
+
+	return r, g, b, a, true
+}
+
+// mixRGB moves a colour towards white for a positive amount and towards black
+// for a negative one, keeping its alpha. It is what gives the flat fills a lit
+// side and a shaded side.
+func mixRGB(color string, amount float64) string {
+	r, g, b, a, ok := parseRGBA(color)
+	if !ok {
+		return color
+	}
+
+	towards := 0.0
+	if amount > 0 {
+		towards = 255
+	}
+
+	blend := func(c int) int {
+		return int(float64(c) + (towards-float64(c))*math.Abs(amount))
+	}
+
+	return fmt.Sprintf("rgba(%d, %d, %d, %.2f)", blend(r), blend(g), blend(b), a)
+}
+
+// tracePolygon lays down the path of a polygon without painting it.
+func tracePolygon(points [][2]float64) {
 	if len(points) < 3 {
 		return
 	}
@@ -40,11 +75,41 @@ func fillPolygon(points [][2]float64, color string) {
 		drawTarget.Call("lineTo", point[0], point[1])
 	}
 	drawTarget.Call("closePath")
+}
 
+// fillPolygon fills the polygon through the given points and outlines it.
+func fillPolygon(points [][2]float64, color string) {
+	if len(points) < 3 {
+		return
+	}
+
+	tracePolygon(points)
 	drawTarget.Set("fillStyle", color)
 	drawTarget.Call("fill")
 
-	drawTarget.Set("strokeStyle", "rgba(0, 0, 0, 0.85)")
+	drawTarget.Set("strokeStyle", hullOutline)
+	drawTarget.Call("stroke")
+}
+
+// fillPlate fills the polygon with a vertical gradient running from a lit top to
+// a shaded bottom, and outlines it. Flat fills read as paper cut-outs; the
+// gradient is what makes a hull look like a solid object at this size.
+func fillPlate(points [][2]float64, color string, top, height float64) {
+	if len(points) < 3 || height <= 0 {
+		fillPolygon(points, color)
+		return
+	}
+
+	gradient := drawTarget.Call("createLinearGradient", 0, top, 0, top+height)
+	gradient.Call("addColorStop", 0, mixRGB(color, 0.45))
+	gradient.Call("addColorStop", 0.45, color)
+	gradient.Call("addColorStop", 1, mixRGB(color, -0.45))
+
+	tracePolygon(points)
+	drawTarget.Set("fillStyle", gradient)
+	drawTarget.Call("fill")
+
+	drawTarget.Set("strokeStyle", hullOutline)
 	drawTarget.Call("stroke")
 }
 
@@ -57,201 +122,220 @@ func fillEllipse(cx, cy, rx, ry float64, color string) {
 	drawTarget.Set("fillStyle", color)
 	drawTarget.Call("fill")
 
-	drawTarget.Set("strokeStyle", "rgba(0, 0, 0, 0.85)")
+	drawTarget.Set("strokeStyle", hullOutline)
 	drawTarget.Call("stroke")
 }
 
-// drawEnemyHull paints the outline of the given shape into the box at x, y.
-// The shapes all point down the screen, towards the player, except the chevron,
+// drawEnemyHull paints the given shape into the box at x, y.
+// The hulls all point down the screen, towards the player, except the chevron,
 // which points away because it marks the one enemy that helps.
 func drawEnemyHull(shape string, x, y, w, h float64, color string) {
+	// px and py map the unit square onto the box, so the geometry below reads as
+	// fractions of the hull rather than as pixel arithmetic.
+	px := func(u float64) float64 { return x + w*u }
+	py := func(v float64) float64 { return y + h*v }
+	poly := func(pts ...[2]float64) [][2]float64 {
+		out := make([][2]float64, 0, len(pts))
+		for _, p := range pts {
+			out = append(out, [2]float64{px(p[0]), py(p[1])})
+		}
+		return out
+	}
+
 	switch shape {
 	case ShapeChevron:
 		// Broad arrowhead pointing up and away from the player.
-		fillPolygon([][2]float64{
-			{x + w*0.5, y},
-			{x + w, y + h*0.62},
-			{x + w*0.72, y + h*0.62},
-			{x + w*0.72, y + h},
-			{x + w*0.28, y + h},
-			{x + w*0.28, y + h*0.62},
-			{x, y + h*0.62},
-		}, color)
+		fillPlate(poly(
+			[2]float64{0.5, 0.02}, [2]float64{0.98, 0.60}, [2]float64{0.72, 0.60},
+			[2]float64{0.72, 0.98}, [2]float64{0.28, 0.98}, [2]float64{0.28, 0.60},
+			[2]float64{0.02, 0.60},
+		), color, y, h)
+		fillPolygon(poly(
+			[2]float64{0.5, 0.18}, [2]float64{0.74, 0.52}, [2]float64{0.26, 0.52},
+		), mixRGB(color, 0.55))
 
 	case ShapePrism:
-		// Faceted crystal: two mirrored halves with a bright core sliver.
-		fillPolygon([][2]float64{
-			{x + w*0.5, y},
-			{x + w*0.9, y + h*0.35},
-			{x + w*0.5, y + h},
-			{x + w*0.1, y + h*0.35},
-		}, color)
-		fillPolygon([][2]float64{
-			{x + w*0.5, y + h*0.1},
-			{x + w*0.68, y + h*0.38},
-			{x + w*0.5, y + h*0.82},
-			{x + w*0.32, y + h*0.38},
-		}, "rgba(255, 255, 255, 0.35)")
+		// Faceted crystal: a six-sided body split down the middle so the two
+		// halves catch the light differently.
+		body := poly(
+			[2]float64{0.5, 0.02}, [2]float64{0.90, 0.30}, [2]float64{0.90, 0.66},
+			[2]float64{0.5, 0.98}, [2]float64{0.10, 0.66}, [2]float64{0.10, 0.30},
+		)
+		fillPlate(body, color, y, h)
+		fillPolygon(poly(
+			[2]float64{0.5, 0.02}, [2]float64{0.90, 0.30}, [2]float64{0.90, 0.66},
+			[2]float64{0.5, 0.98},
+		), mixRGB(color, -0.35))
+		fillPolygon(poly(
+			[2]float64{0.5, 0.14}, [2]float64{0.66, 0.34}, [2]float64{0.5, 0.72},
+			[2]float64{0.34, 0.34},
+		), mixRGB(color, 0.7))
 
 	case ShapePhantom:
-		// A hollow lozenge: the outer body is faint and only the rim is solid,
-		// so the hull reads as a smudge until it is close.
-		fillPolygon([][2]float64{
-			{x + w*0.5, y + h*0.05},
-			{x + w*0.85, y + h*0.5},
-			{x + w*0.5, y + h*0.95},
-			{x + w*0.15, y + h*0.5},
-		}, color)
-		fillPolygon([][2]float64{
-			{x + w*0.5, y + h*0.3},
-			{x + w*0.66, y + h*0.5},
-			{x + w*0.5, y + h*0.7},
-			{x + w*0.34, y + h*0.5},
-		}, "rgba(0, 0, 0, 0.55)")
+		// A hollow lozenge inside a faint aura: the hull is meant to be hard to
+		// pick out, but it has to be large enough to be findable at all.
+		fillPolygon(poly(
+			[2]float64{0.5, 0.00}, [2]float64{1.00, 0.50}, [2]float64{0.5, 1.00},
+			[2]float64{0.00, 0.50},
+		), mixRGB(color, -0.55))
+		fillPlate(poly(
+			[2]float64{0.5, 0.10}, [2]float64{0.86, 0.50}, [2]float64{0.5, 0.90},
+			[2]float64{0.14, 0.50},
+		), color, y, h)
+		fillPolygon(poly(
+			[2]float64{0.5, 0.32}, [2]float64{0.66, 0.50}, [2]float64{0.5, 0.68},
+			[2]float64{0.34, 0.50},
+		), "rgba(0, 0, 0, 0.65)")
 
 	case ShapeSpike:
-		// Three forward spikes on a narrow spine.
-		for _, offset := range [...]float64{0.16, 0.5, 0.84} {
-			fillPolygon([][2]float64{
-				{x + w*(offset-0.13), y + h*0.35},
-				{x + w*offset, y + h},
-				{x + w*(offset+0.13), y + h*0.35},
-			}, color)
+		// A blunt head with three fangs hanging off it. Short and fat, so that it
+		// does not read as the trident's long prongs.
+		fillPlate(poly(
+			[2]float64{0.04, 0.06}, [2]float64{0.96, 0.06}, [2]float64{0.88, 0.52},
+			[2]float64{0.12, 0.52},
+		), color, y, h*0.6)
+		for _, u := range [...]float64{0.22, 0.5, 0.78} {
+			fillPolygon(poly(
+				[2]float64{u - 0.14, 0.50}, [2]float64{u + 0.14, 0.50}, [2]float64{u, 0.96},
+			), mixRGB(color, -0.25))
 		}
-		fillPolygon([][2]float64{
-			{x, y + h*0.12},
-			{x + w, y + h*0.12},
-			{x + w*0.8, y + h*0.45},
-			{x + w*0.2, y + h*0.45},
-		}, color)
+		for _, u := range [...]float64{0.32, 0.68} {
+			fillEllipse(px(u), py(0.26), w*0.07, h*0.07, "rgba(0, 0, 0, 0.7)")
+		}
 
 	case ShapeHexpod:
-		// Hexagonal core flanked by two engine pods.
-		fillPolygon([][2]float64{
-			{x + w*0.5, y},
-			{x + w*0.82, y + h*0.28},
-			{x + w*0.82, y + h*0.72},
-			{x + w*0.5, y + h},
-			{x + w*0.18, y + h*0.72},
-			{x + w*0.18, y + h*0.28},
-		}, color)
-		fillEllipse(x+w*0.12, y+h*0.5, w*0.12, h*0.26, color)
-		fillEllipse(x+w*0.88, y+h*0.5, w*0.12, h*0.26, color)
+		// Hexagonal core slung between two engine pods that clear the hull, so
+		// the pods stay part of the silhouette rather than merging into it.
+		for _, u := range [...]float64{0.11, 0.89} {
+			fillEllipse(px(u), py(0.46), w*0.11, h*0.34, mixRGB(color, -0.3))
+			fillEllipse(px(u), py(0.74), w*0.06, h*0.09, mixRGB(color, 0.5))
+		}
+		fillPlate(poly(
+			[2]float64{0.5, 0.02}, [2]float64{0.78, 0.26}, [2]float64{0.78, 0.72},
+			[2]float64{0.5, 0.98}, [2]float64{0.22, 0.72}, [2]float64{0.22, 0.26},
+		), color, y, h)
+		fillEllipse(px(0.5), py(0.42), w*0.13, h*0.15, mixRGB(color, 0.6))
 
 	case ShapeRam:
 		// Heavy wedge behind a battering prow.
-		fillPolygon([][2]float64{
-			{x + w*0.12, y},
-			{x + w*0.88, y},
-			{x + w, y + h*0.55},
-			{x + w*0.5, y + h*0.78},
-			{x, y + h*0.55},
-		}, color)
-		fillPolygon([][2]float64{
-			{x + w*0.3, y + h*0.7},
-			{x + w*0.7, y + h*0.7},
-			{x + w*0.5, y + h},
-		}, "rgba(255, 255, 255, 0.3)")
+		fillPlate(poly(
+			[2]float64{0.06, 0.04}, [2]float64{0.94, 0.04}, [2]float64{1.00, 0.48},
+			[2]float64{0.5, 0.80}, [2]float64{0.00, 0.48},
+		), color, y, h)
+		fillPolygon(poly(
+			[2]float64{0.30, 0.70}, [2]float64{0.70, 0.70}, [2]float64{0.5, 1.00},
+		), mixRGB(color, 0.5))
+		fillPolygon(poly(
+			[2]float64{0.16, 0.16}, [2]float64{0.84, 0.16}, [2]float64{0.78, 0.34},
+			[2]float64{0.22, 0.34},
+		), mixRGB(color, -0.4))
 
 	case ShapeDagger:
-		// Long blade with wings swept back along the hull.
-		fillPolygon([][2]float64{
-			{x + w*0.42, y},
-			{x + w*0.58, y},
-			{x + w*0.58, y + h*0.7},
-			{x + w*0.5, y + h},
-			{x + w*0.42, y + h*0.7},
-		}, color)
-		fillPolygon([][2]float64{
-			{x + w*0.42, y + h*0.15},
-			{x + w*0.42, y + h*0.6},
-			{x, y + h*0.3},
-		}, color)
-		fillPolygon([][2]float64{
-			{x + w*0.58, y + h*0.15},
-			{x + w*0.58, y + h*0.6},
-			{x + w, y + h*0.3},
-		}, color)
+		// A blade with its wings swept back along the hull. The wings used to
+		// splay sideways, which made the whole thing read as an arrow pointing
+		// left rather than as a ship pointing down.
+		fillPolygon(poly(
+			[2]float64{0.40, 0.24}, [2]float64{0.40, 0.70}, [2]float64{0.10, 0.34},
+			[2]float64{0.14, 0.06},
+		), mixRGB(color, -0.3))
+		fillPolygon(poly(
+			[2]float64{0.60, 0.24}, [2]float64{0.60, 0.70}, [2]float64{0.90, 0.34},
+			[2]float64{0.86, 0.06},
+		), mixRGB(color, -0.3))
+		fillPlate(poly(
+			[2]float64{0.5, 0.00}, [2]float64{0.62, 0.16}, [2]float64{0.62, 0.74},
+			[2]float64{0.5, 1.00}, [2]float64{0.38, 0.74}, [2]float64{0.38, 0.16},
+		), color, y, h)
+		fillEllipse(px(0.5), py(0.34), w*0.07, h*0.12, mixRGB(color, 0.65))
 
 	case ShapeFortress:
-		// Blocky armoured hull with turret notches along the leading edge.
-		fillPolygon([][2]float64{
-			{x + w*0.08, y + h*0.1},
-			{x + w*0.92, y + h*0.1},
-			{x + w*0.92, y + h*0.72},
-			{x + w*0.66, y + h*0.92},
-			{x + w*0.34, y + h*0.92},
-			{x + w*0.08, y + h*0.72},
-		}, color)
-		for _, offset := range [...]float64{0.22, 0.5, 0.78} {
-			fillPolygon([][2]float64{
-				{x + w*(offset-0.09), y},
-				{x + w*(offset+0.09), y},
-				{x + w*(offset+0.09), y + h*0.1},
-				{x + w*(offset-0.09), y + h*0.1},
-			}, color)
+		// Blocky armoured hull with turrets standing clear of its back.
+		for _, u := range [...]float64{0.22, 0.5, 0.78} {
+			fillPolygon(poly(
+				[2]float64{u - 0.08, 0.00}, [2]float64{u + 0.08, 0.00},
+				[2]float64{u + 0.08, 0.22}, [2]float64{u - 0.08, 0.22},
+			), mixRGB(color, -0.35))
 		}
+		fillPlate(poly(
+			[2]float64{0.04, 0.20}, [2]float64{0.96, 0.20}, [2]float64{0.96, 0.68},
+			[2]float64{0.72, 0.96}, [2]float64{0.28, 0.96}, [2]float64{0.04, 0.68},
+		), color, py(0.2), h*0.76)
+		fillPolygon(poly(
+			[2]float64{0.14, 0.46}, [2]float64{0.86, 0.46}, [2]float64{0.86, 0.58},
+			[2]float64{0.14, 0.58},
+		), mixRGB(color, -0.45))
+
+	case ShapeShield:
+		// A braced shield plate: the Bulwark used to borrow the fortress hull, so
+		// two different types looked identical apart from their colour.
+		fillPlate(poly(
+			[2]float64{0.08, 0.06}, [2]float64{0.92, 0.06}, [2]float64{0.92, 0.52},
+			[2]float64{0.5, 0.98}, [2]float64{0.08, 0.52},
+		), color, y, h)
+		fillPolygon(poly(
+			[2]float64{0.44, 0.14}, [2]float64{0.56, 0.14}, [2]float64{0.56, 0.80},
+			[2]float64{0.44, 0.80},
+		), mixRGB(color, 0.55))
+		fillPolygon(poly(
+			[2]float64{0.18, 0.36}, [2]float64{0.82, 0.36}, [2]float64{0.82, 0.48},
+			[2]float64{0.18, 0.48},
+		), mixRGB(color, 0.55))
 
 	case ShapeTrident:
-		// Three prongs hanging off a broad base.
-		fillPolygon([][2]float64{
-			{x, y + h*0.05},
-			{x + w, y + h*0.05},
-			{x + w*0.85, y + h*0.42},
-			{x + w*0.15, y + h*0.42},
-		}, color)
-		for _, offset := range [...]float64{0.2, 0.5, 0.8} {
-			fillPolygon([][2]float64{
-				{x + w*(offset-0.1), y + h*0.42},
-				{x + w*(offset+0.1), y + h*0.42},
-				{x + w*offset, y + h},
-			}, color)
+		// Three long prongs hanging off a broad bar. The prongs are deliberately
+		// thin and long where the spike's fangs are short and fat.
+		fillPlate(poly(
+			[2]float64{0.00, 0.04}, [2]float64{1.00, 0.04}, [2]float64{0.90, 0.32},
+			[2]float64{0.10, 0.32},
+		), color, y, h*0.4)
+		for _, u := range [...]float64{0.18, 0.5, 0.82} {
+			fillPolygon(poly(
+				[2]float64{u - 0.07, 0.30}, [2]float64{u + 0.07, 0.30},
+				[2]float64{u + 0.04, 0.86}, [2]float64{u, 1.00}, [2]float64{u - 0.04, 0.86},
+			), mixRGB(color, -0.2))
 		}
 
 	case ShapeSaucer:
 		// Wide disc under a raised dome.
-		fillEllipse(x+w*0.5, y+h*0.55, w*0.5, h*0.28, color)
-		fillEllipse(x+w*0.5, y+h*0.38, w*0.26, h*0.22, color)
-		fillEllipse(x+w*0.5, y+h*0.34, w*0.12, h*0.1, "rgba(255, 255, 255, 0.4)")
+		fillEllipse(px(0.5), py(0.58), w*0.5, h*0.26, mixRGB(color, -0.3))
+		fillEllipse(px(0.5), py(0.50), w*0.44, h*0.18, color)
+		fillEllipse(px(0.5), py(0.34), w*0.24, h*0.20, mixRGB(color, 0.35))
+		fillEllipse(px(0.5), py(0.30), w*0.10, h*0.08, mixRGB(color, 0.8))
 
 	case ShapeCrown:
-		// Capital ship: a wide hull topped with a crown of spires.
-		fillPolygon([][2]float64{
-			{x, y + h*0.35},
-			{x + w*0.2, y + h*0.2},
-			{x + w*0.8, y + h*0.2},
-			{x + w, y + h*0.35},
-			{x + w*0.72, y + h*0.85},
-			{x + w*0.28, y + h*0.85},
-		}, color)
-		for _, offset := range [...]float64{0.28, 0.5, 0.72} {
-			fillPolygon([][2]float64{
-				{x + w*(offset-0.08), y + h*0.2},
-				{x + w*offset, y},
-				{x + w*(offset+0.08), y + h*0.2},
-			}, color)
+		// Capital ship: a wide hull under a crown of spires, with the gaps
+		// between the spires kept wide enough to survive at this size.
+		for _, u := range [...]float64{0.24, 0.5, 0.76} {
+			fillPolygon(poly(
+				[2]float64{u - 0.09, 0.30}, [2]float64{u, 0.00}, [2]float64{u + 0.09, 0.30},
+			), mixRGB(color, -0.3))
 		}
-		fillPolygon([][2]float64{
-			{x + w*0.38, y + h*0.85},
-			{x + w*0.62, y + h*0.85},
-			{x + w*0.5, y + h},
-		}, color)
+		fillPlate(poly(
+			[2]float64{0.02, 0.30}, [2]float64{0.98, 0.30}, [2]float64{0.84, 0.72},
+			[2]float64{0.16, 0.72},
+		), color, py(0.3), h*0.42)
+		fillPolygon(poly(
+			[2]float64{0.34, 0.72}, [2]float64{0.66, 0.72}, [2]float64{0.5, 1.00},
+		), mixRGB(color, 0.4))
+		fillEllipse(px(0.5), py(0.48), w*0.11, h*0.10, mixRGB(color, 0.7))
 
 	default: // ShapeArrow
-		// A small dart: the shape the whole roster used to share, kept for the
-		// rank and file it actually suits.
-		fillPolygon([][2]float64{
-			{x + w*0.5, y + h},
-			{x + w*0.2, y + h*0.25},
-			{x + w*0.5, y + h*0.4},
-			{x + w*0.8, y + h*0.25},
-		}, color)
-		fillPolygon([][2]float64{
-			{x + w*0.4, y},
-			{x + w*0.6, y},
-			{x + w*0.6, y + h*0.5},
-			{x + w*0.4, y + h*0.5},
-		}, color)
+		// A compact fighter: a fuselage with wings swept back from it. This is
+		// the hull the bulk of the roster wears, and as a bare dart it read as a
+		// typographic arrow rather than as a ship.
+		fillPolygon(poly(
+			[2]float64{0.36, 0.28}, [2]float64{0.36, 0.62}, [2]float64{0.02, 0.44},
+			[2]float64{0.08, 0.14},
+		), mixRGB(color, -0.35))
+		fillPolygon(poly(
+			[2]float64{0.64, 0.28}, [2]float64{0.64, 0.62}, [2]float64{0.98, 0.44},
+			[2]float64{0.92, 0.14},
+		), mixRGB(color, -0.35))
+		fillPlate(poly(
+			[2]float64{0.5, 0.02}, [2]float64{0.66, 0.24}, [2]float64{0.64, 0.70},
+			[2]float64{0.5, 1.00}, [2]float64{0.36, 0.70}, [2]float64{0.34, 0.24},
+		), color, y, h)
+		fillEllipse(px(0.5), py(0.36), w*0.10, h*0.13, mixRGB(color, 0.7))
 	}
 }
 

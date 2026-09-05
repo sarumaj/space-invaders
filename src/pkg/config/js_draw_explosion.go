@@ -126,9 +126,8 @@ func DrawBlast(coords [2]float64, radius float64, style, color string, progress,
 // Enemy colours arrive in that form from the colour catalogue, and the blast has
 // to fade them out without knowing which one it was handed.
 func withAlpha(color string, alpha float64) string {
-	var r, g, b int
-	var a float64
-	if _, err := fmt.Sscanf(color, "rgba(%d, %d, %d, %f)", &r, &g, &b, &a); err != nil {
+	r, g, b, _, ok := parseRGBA(color)
+	if !ok {
 		return fmt.Sprintf("rgba(255, 255, 255, %.2f)", alpha)
 	}
 

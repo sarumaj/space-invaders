@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+// maximumShieldPips is how many shield pips the display draws before it falls
+// back to a numeric summary.
+const maximumShieldPips = 8
+
 const (
 	originalWidth  = 800 // Original width of the drawable canvas area (px, after considering the padding and border of the surrounding containers)
 	originalHeight = 600 // Original height of the drawable canvas area (px, after considering the padding and border of the surrounding containers)
@@ -55,6 +59,7 @@ var (
 	eventLogChannel        = document.Call("getElementById", eventLogChannelID)
 	eventLogChannelBtn     = document.Call("getElementById", eventLogChannelButtonID)
 	fpsDiv                 = document.Call("getElementById", "fps")
+	infoPanel              = document.Call("getElementById", "info")
 	hudCannonsSpan         = document.Call("getElementById", "hudCannons")
 	hudExperienceBar       = document.Call("getElementById", "hudExperience")
 	hudLevelSpan           = document.Call("getElementById", "hudLevel")
@@ -165,10 +170,11 @@ func init() {
 	// Warm the decoded audio cache before the game starts
 	preloadAudio()
 
-	// The frame rate is a diagnostic, not something the player needs, so it only
-	// appears when debugging is switched on.
+	// The frame rate is a diagnostic, not something the player needs, so its
+	// whole panel only appears when debugging is switched on. Hiding just the
+	// readout would leave the panel behind as an empty translucent box.
 	if Config.Control.Debug.Get() {
-		fpsDiv.Set("hidden", false)
+		infoPanel.Set("hidden", false)
 	}
 
 	// Detach the watchdogs
