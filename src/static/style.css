@@ -6,6 +6,7 @@ body {
   justify-content: center;
   background-color: #000;
   height: 100vh;
+  height: 100dvh; /* Mobile browsers count the URL bar into 100vh, 100dvh excludes it */
   overflow-y: auto; /* Make body scrollable */
   overscroll-behavior: none; /* Prevent scrolling from affecting parent containers */
 }
@@ -26,6 +27,7 @@ body {
 
 #gameContainer #canvasContainer {
   position: relative; /* Important: This positions the #info div correctly */
+  container-type: inline-size; /* The heads-up display sizes itself against this */
   display: flex;
   justify-content: center;
   align-items: center;
@@ -61,19 +63,19 @@ body {
 
 #gameContainer #canvasContainer #hud {
   position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
+  top: clamp(4px, 1.4cqw, 10px);
+  left: clamp(5px, 1.6cqw, 12px);
+  right: clamp(5px, 1.6cqw, 12px);
   display: flex;
   flex-wrap: nowrap; /* One line only: wrapping grew the HUD down over the play area */
-  gap: 12px;
+  gap: clamp(5px, 1.6cqw, 12px);
   align-items: center;
   box-sizing: border-box;
-  max-width: calc(100% - 24px);
+  max-width: calc(100% - clamp(10px, 3.2cqw, 24px));
   overflow: hidden; /* Nothing inside the HUD may escape the canvas */
   color: #fff;
   font-family: "Courier New", Courier, monospace;
-  font-size: 13px;
+  font-size: clamp(8px, 2.1cqw, 13px);
   line-height: 1;
   text-shadow: 0 0 4px #000, 0 0 2px #000; /* Stay readable over a bright planet */
   z-index: 2;
@@ -83,7 +85,7 @@ body {
 #gameContainer #canvasContainer #hud .hud-stat {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: clamp(3px, 0.9cqw, 6px);
   min-width: 0; /* Let a flex item shrink below its content instead of overflowing */
   flex: 0 0 auto;
   overflow: hidden;
@@ -91,9 +93,9 @@ body {
 
 /* The experience bar is the one stat that takes up the slack in the row. */
 #gameContainer #canvasContainer #hud .hud-stat-wide {
-  flex: 1 1 80px;
-  min-width: 60px;
-  max-width: 150px;
+  flex: 1 1 10cqw;
+  min-width: 8cqw;
+  max-width: 19cqw;
 }
 
 /* The shield sizes to its pips, which the display already caps, so that the
@@ -104,20 +106,20 @@ body {
 
 #gameContainer #canvasContainer #hud .hud-label {
   color: rgba(255, 255, 255, 0.6);
-  font-size: 10px;
+  font-size: clamp(6px, 1.6cqw, 10px);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 #gameContainer #canvasContainer #hud .hud-value {
-  font-size: 15px;
+  font-size: clamp(9px, 2.5cqw, 15px);
   font-weight: bold;
   font-variant-numeric: tabular-nums;
 }
 
 #gameContainer #canvasContainer #hud .hud-bar {
   flex: 1;
-  height: 6px;
+  height: clamp(4px, 0.9cqw, 6px);
   border: 1px solid rgba(255, 255, 255, 0.5);
   background: rgba(0, 0, 0, 0.4);
 }
@@ -133,21 +135,21 @@ body {
 #gameContainer #canvasContainer #hud .hud-pips {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: clamp(2px, 0.5cqw, 3px);
   min-width: 0;
   overflow: hidden;
 }
 
 #gameContainer #canvasContainer #hud .hud-pips > b {
-  font-size: 10px;
+  font-size: clamp(6px, 1.6cqw, 10px);
   font-weight: bold;
   white-space: nowrap;
 }
 
 #gameContainer #canvasContainer #hud .hud-pips > i {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
+  width: clamp(5px, 1.3cqw, 8px);
+  height: clamp(5px, 1.3cqw, 8px);
   border: 1px solid rgba(255, 255, 255, 0.5);
   background: transparent;
 }
@@ -254,7 +256,7 @@ body {
 }
 
 #gameContainer #messageContainer #message .indented {
-  padding-left: 120px;
+  padding-left: min(120px, 22%);
 }
 
 #gameContainer #messageContainer #message .indented-inline {
@@ -262,7 +264,7 @@ body {
 }
 
 #gameContainer #messageContainer #message .timestamp {
-  width: 120px; /* Fixed width for the timestamp */
+  width: min(120px, 22%); /* Fixed width for the timestamp, capped against the column */
   color: rgb(163, 163, 163);
   flex-shrink: 0; /* Prevent the timestamp from shrinking */
 }
@@ -388,4 +390,135 @@ body {
 #loadingOverlay #loadingMessage {
   font-size: 2em;
   text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Small screens.
+
+   The stylesheet above is written for a desktop window, where the 800px canvas,
+   a 24px title and a 200px message box all fit at once. On a phone they do not:
+   the title wrapped onto two lines and took a fifth of the screen, and in
+   landscape the canvas was sized from the width alone, so it stood 553px tall in
+   a 342px viewport and the game was simply off screen.
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 700px), (max-height: 560px) {
+  #gameContainer {
+    padding: 6px;
+  }
+
+  #gameContainer #header {
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom-width: 3px;
+  }
+
+  #gameContainer #header #title {
+    font-size: clamp(12px, 3.4vw, 20px);
+    /* Two lines of title cost more than the title is worth on a phone. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #gameContainer #header svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  #gameContainer #header button {
+    margin: 0 2px;
+  }
+
+  /* Keep the two game controls at a comfortable size for a thumb even as the
+     rest of the header shrinks. */
+  #gameContainer #header #audioToggle,
+  #gameContainer #header #refreshButton {
+    font-size: 22px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  #gameContainer #canvasContainer {
+    border-width: 2px;
+    padding: 2px;
+    margin-bottom: 8px;
+  }
+
+  #gameContainer #messageContainer {
+    min-height: 0;
+    font-size: 13px;
+  }
+
+  #gameContainer #messageContainer .tab {
+    padding: 6px;
+    font-size: 13px;
+  }
+
+  #gameContainer #messageContainer .tab.active {
+    border-width: 3px;
+  }
+
+  #gameContainer #messageContainer .tab:not(.active) {
+    border-bottom-width: 3px;
+  }
+
+  #gameContainer #messageContainer #message {
+    border-width: 3px;
+    border-top: none;
+  }
+}
+
+/* Very narrow: the title is the first thing to go, so the controls keep their
+   full tap area. */
+@media (max-width: 380px) {
+  #gameContainer #header #title {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Landscape on a phone.
+
+   Here the height is the binding constraint and there is width to spare, so the
+   canvas is sized from the height and the message box moves alongside it rather
+   than below it.
+   --------------------------------------------------------------------------- */
+
+@media (orientation: landscape) and (max-height: 560px) {
+  body {
+    justify-content: flex-start;
+  }
+
+  #gameContainer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "header header"
+      "canvas messages";
+    gap: 8px;
+    max-width: none;
+    align-items: stretch;
+  }
+
+  #gameContainer #header {
+    grid-area: header;
+    margin-bottom: 0;
+    max-width: none;
+  }
+
+  #gameContainer #canvasContainer {
+    grid-area: canvas;
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    margin-bottom: 0;
+  }
+
+  #gameContainer #messageContainer {
+    grid-area: messages;
+    height: 100%;
+    max-width: none;
+  }
 }
