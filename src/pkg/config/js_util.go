@@ -402,7 +402,83 @@ func PlayAudio(name string, loop bool) {
 
 	// Resolves immediately once the track has been decoded, which after the
 	// initial preload is every time.
-	audioBuffer(name, func(buffer js.Value) { startAudioSource(name, player, buffer) })
+	audioBuffer(name, func(buffer js.Value) {
+		whenAudioRunning(func(running bool) {
+			if !running {
+				// Hand the start a null buffer so that it clears the pending flag
+				// rather than leaving the track stuck as forever starting.
+				buffer = js.Null()
+			}
+
+			startAudioSource(name, player, buffer)
+		})
+	})
+}
+
+// whenAudioRunning runs fn once the audio context is actually running, resuming
+// it first if it is not, and reports whether it got there.
+//
+// Browsers hand out a suspended context until a user gesture, and resume is
+// asynchronous. Starting a source on a context that is still suspended is
+// dropped outright by mobile browsers rather than played once it resumes, which
+// singled out the theme: it is the first sound the game plays, requested by the
+// very gesture that has to unlock the context, so it was the one that never
+// arrived while every later effect was fine.
+func whenAudioRunning(fn func(running bool)) {
+	if !audioCtx.Truthy() {
+		fn(false)
+		return
+	}
+
+	if audioCtx.Get("state").String() == audioContextRunning {
+		fn(true)
+		return
+	}
+
+	if Config.Control.Debug.Get() {
+		Log(fmt.Sprintf("Resuming audio context from state: %s", audioCtx.Get("state").String()))
+	}
+
+	var then, catch js.Func
+	settle := func() {
+		state := audioCtx.Get("state").String()
+		then.Release()
+		catch.Release()
+
+		if Config.Control.Debug.Get() {
+			Log(fmt.Sprintf("Audio context settled in state: %s", state))
+		}
+
+		fn(state == audioContextRunning)
+	}
+
+	then = js.FuncOf(func(js.Value, []js.Value) any { settle(); return nil })
+	catch = js.FuncOf(func(js.Value, []js.Value) any { settle(); return nil })
+
+	audioCtx.Call("resume").Call("then", then).Call("catch", catch)
+}
+
+// resumePendingLoops restarts the looping tracks that ought to be playing but
+// are not. A track requested while the context was still locked, or interrupted
+// by a call or an alarm on a phone, would otherwise stay silent for the rest of
+// the session because nothing asks for it a second time.
+func resumePendingLoops() {
+	if !*Config.Control.AudioEnabled {
+		return
+	}
+
+	audioPlayersMutex.RLock()
+	var pending []string
+	for name, player := range audioPlayers {
+		if player.loop && !player.starting && !player.source.Truthy() {
+			pending = append(pending, name)
+		}
+	}
+	audioPlayersMutex.RUnlock()
+
+	for _, name := range pending {
+		PlayAudio(name, true)
+	}
 }
 
 // startAudioSource wires a decoded buffer up to the destination and starts it.
@@ -420,12 +496,6 @@ func startAudioSource(name string, player *audioPlayer, buffer js.Value) {
 
 	if !buffer.Truthy() || player.source.Truthy() {
 		return
-	}
-
-	// Browsers hand out a suspended context until the first user gesture.
-	// Resuming a running context is a no-op.
-	if audioCtx.Get("state").String() == "suspended" {
-		audioCtx.Call("resume")
 	}
 
 	source := audioCtx.Call("createBufferSource")
@@ -631,8 +701,9 @@ func StopAudio(name string) {
 	}
 
 	// Cancel a playback that is still waiting for its buffer, so that it does
-	// not start after the caller asked for silence.
-	player.starting = false
+	// not start after the caller asked for silence, and drop the repeat so that
+	// resumePendingLoops does not resurrect a track that was deliberately ended.
+	player.starting, player.loop = false, false
 
 	if !player.source.Truthy() {
 		return

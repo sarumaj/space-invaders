@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// audioContextRunning is the AudioContext state in which a source may be started.
+const audioContextRunning = "running"
+
 const (
 	originalWidth  = 800 // Original width of the drawable canvas area (px, after considering the padding and border of the surrounding containers)
 	originalHeight = 600 // Original height of the drawable canvas area (px, after considering the padding and border of the surrounding containers)
@@ -287,6 +290,29 @@ func setupAudioInterface() {
 		audioToggle()
 		return nil
 	}))
+
+	// Unlock the audio context from the DOM event itself. The game handles its
+	// own input on a goroutine, by which point the browser no longer considers
+	// itself inside the gesture and refuses to resume. The listeners stay
+	// attached because a phone can suspend the context again at any interruption.
+	unlock := js.FuncOf(func(js.Value, []js.Value) any {
+		if !audioCtx.Truthy() || audioCtx.Get("state").String() == audioContextRunning {
+			return nil
+		}
+
+		whenAudioRunning(func(running bool) {
+			if running {
+				resumePendingLoops()
+			}
+		})
+
+		return nil
+	})
+
+	unlockOptions := MakeObject(map[string]any{"capture": true, "passive": true})
+	for _, event := range [...]string{"pointerdown", "touchend", "keydown"} {
+		document.Call("addEventListener", event, unlock, unlockOptions)
+	}
 
 	audioToggleBtn := document.Call("getElementById", audioToggleBtnId)
 	audioToggleBtn.Call("addEventListener", "click", GlobalGet("toggleAudioClick"))
