@@ -22,6 +22,7 @@ type score struct {
 
 func AddEventListener(event string, listener any)         {}
 func AddEventListenerToCanvas(event string, listener any) {}
+func AddEventListenerToWindow(event string, listener any) {}
 
 func CanvasBoundingBox() dimensions {
 	return dimensions{BoxWidth: 800, BoxHeight: 600, BoxRight: 800, BoxBottom: 600}
@@ -69,6 +70,7 @@ const (
 	BlastShockwave = "shockwave"
 	BlastSpiral    = "spiral"
 	BlastVaporize  = "vaporize"
+	BlastWreck     = "wreck"
 )
 
 func DrawBlast(coords [2]float64, radius float64, style, color string, progress, seed float64) {}

@@ -18,6 +18,7 @@ const (
 	BlastShockwave = "shockwave" // Concentric rings racing outwards.
 	BlastSpiral    = "spiral"    // Debris thrown along a spinning arc.
 	BlastVaporize  = "vaporize"  // A soft cloud that thins out and drifts.
+	BlastWreck     = "wreck"     // The spaceship's hull tearing itself apart.
 )
 
 // DrawBlast draws one frame of a destruction animation.
@@ -101,6 +102,59 @@ func DrawBlast(coords [2]float64, radius float64, style, color string, progress,
 		drawTarget.Set("fillStyle", gradient)
 		drawTarget.Call("fill")
 
+	case BlastWreck:
+		// The spaceship's own end. The enemy styles all resolve within a fifth of
+		// a second because a kill has to stay readable while the next one is
+		// already happening; this one has the screen to itself, so it is built to
+		// be watched: a shockwave, a fireball, hull plates tumbling out of it and
+		// sparks outrunning them all.
+		if progress < 0.5 {
+			ring := progress / 0.5
+			drawTarget.Call("beginPath")
+			drawTarget.Call("arc", cx, cy, radius*(0.8+ring*3.4), 0, 2*math.Pi, false)
+			drawTarget.Set("strokeStyle", fmt.Sprintf("rgba(255, 240, 200, %.2f)", (1-ring)*0.7))
+			drawTarget.Set("lineWidth", 3*(1-ring))
+			drawTarget.Call("stroke")
+			drawTarget.Set("lineWidth", 1)
+		}
+
+		// The fireball swells and cools, carrying the hull colour outwards so the
+		// wreck stays recognisably the player's spaceship.
+		core := radius * (0.6 + progress*1.8)
+		drawTarget.Call("beginPath")
+		drawTarget.Call("arc", cx, cy, core, 0, 2*math.Pi, false)
+		drawTarget.Call("closePath")
+		drawTarget.Set("fillStyle", createRadialGradient(cx, cy, 0, core, []colorStop{
+			{0, fmt.Sprintf("rgba(255, 255, 240, %.2f)", fade)},
+			{0.35, fmt.Sprintf("rgba(255, 190, 90, %.2f)", fade*0.8)},
+			{0.7, withAlpha(color, fade*0.45)},
+			{1, "rgba(80, 40, 20, 0)"},
+		}))
+		drawTarget.Call("fill")
+
+		// Hull plates: each keeps its heading and tumbles as it goes, which is
+		// what separates a ship breaking up from a shell exploding.
+		for i := 0; i < 7; i++ {
+			angle := seed + float64(i)*2*math.Pi/7
+			distance := radius * progress * 3.2
+			px, py := cx+math.Cos(angle)*distance, cy+math.Sin(angle)*distance
+			long, short := radius*0.45*fade, radius*0.22*fade
+
+			fillPolygon(spinPolygon([][2]float64{
+				{px + long, py},
+				{px - short, py + short},
+				{px - short, py - short},
+			}, px, py, seed*2+progress*6+float64(i)), withAlpha(color, 0.3+fade*0.7))
+		}
+
+		// Sparks outrun the plates and die first.
+		for i := 0; i < 12; i++ {
+			angle := seed*3 + float64(i)*2*math.Pi/12
+			distance := radius * progress * (2.4 + math.Mod(float64(i), 3))
+			drawArc(cx+math.Cos(angle)*distance, cy+math.Sin(angle)*distance, radius*0.08*fade,
+				fmt.Sprintf("rgba(255, %d, 90, %.2f)", 240-i*10, fade*fade))
+		}
+
 	default: // BlastBurst
 		// The plain kill: a hot core inside a ring of shards.
 		drawArc(cx, cy, radius*(0.9-progress*0.6), fmt.Sprintf("rgba(255, 236, 150, %.2f)", fade))
@@ -120,6 +174,21 @@ func DrawBlast(coords [2]float64, radius float64, style, color string, progress,
 		// A last wash of the hull colour, so the kill is attributable.
 		drawArc(cx, cy, radius*progress*1.6, withAlpha(color, fade*0.25))
 	}
+}
+
+// spinPolygon turns the points around the given centre by the given angle.
+// The canvas transform would do the same, but saving and restoring it once per
+// fragment costs more than the arithmetic does.
+func spinPolygon(points [][2]float64, cx, cy, angle float64) [][2]float64 {
+	sin, cos := math.Sin(angle), math.Cos(angle)
+
+	spun := make([][2]float64, 0, len(points))
+	for _, point := range points {
+		dx, dy := point[0]-cx, point[1]-cy
+		spun = append(spun, [2]float64{cx + dx*cos - dy*sin, cy + dx*sin + dy*cos})
+	}
+
+	return spun
 }
 
 // withAlpha re-expresses an "rgba(r, g, b, a)" colour at a different alpha.

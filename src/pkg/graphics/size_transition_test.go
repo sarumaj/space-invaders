@@ -22,7 +22,7 @@ test:
 	for {
 		select {
 		case <-ticker.C:
-			transition.Interpolate()
+			transition.Interpolate(1)
 			t.Logf("Size: %v, Position: %v", transition.Size(), transition.Position())
 
 		case <-timer.C:

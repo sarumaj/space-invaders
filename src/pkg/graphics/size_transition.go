@@ -18,20 +18,41 @@ type SizeTransition struct {
 	immutable         bool                  // If immutable, the transition cannot be changed, until it ends
 }
 
-// Interpolate interpolates the transition.
-// It performs one transition step from the current size to the target size and position.
-func (t *SizeTransition) Interpolate() {
+// Interpolate advances the transition by one frame.
+// The scale is how far the frame advanced the simulation, expressed in nominal
+// frames, so that the transition takes its configured duration in wall-clock
+// time whatever the display refresh rate happens to be.
+func (t *SizeTransition) Interpolate(scale numeric.Number) {
+	if numeric.Equal(t.currentScale, t.targetScale, 1e-9) {
+		// The callback fires once and is then dropped, as for a colour transition.
+		if end := t.transitionEnd; end != nil {
+			t.transitionEnd = nil
+			end(t)
+		}
+
+		return
+	}
+
 	numberOfFrames := numeric.Number(config.Config.Control.DesiredFramesPerSecondRate) *
 		numeric.Number(t.animationDuration.Seconds())
 
-	if !numeric.Equal(t.currentScale, t.targetScale, 1e-9) {
-		sizeFactor := numeric.E.Pow(t.targetScale.Log() / numberOfFrames)
-		t.size, t.position = t.size.Resize(sizeFactor, t.position)
-		t.size.Scale = 1
-		t.currentScale *= sizeFactor
-	} else if t.transitionEnd != nil {
-		t.transitionEnd(t)
+	sizeFactor := t.targetScale / t.currentScale // Arrive at once, unless the steps below say otherwise.
+	if numberOfFrames > 0 && t.currentScale > 0 {
+		// The scale grows geometrically, so the frame scale belongs in the
+		// exponent rather than as a factor on the result.
+		stepped := numeric.E.Pow(t.targetScale.Log() / numberOfFrames * scale)
+
+		// Land on the target rather than past it.
+		if next := t.currentScale * stepped; (t.targetScale >= 1 && next <= t.targetScale) ||
+			(t.targetScale < 1 && next >= t.targetScale) {
+
+			sizeFactor = stepped
+		}
 	}
+
+	t.size, t.position = t.size.Resize(sizeFactor, t.position)
+	t.size.Scale = 1
+	t.currentScale *= sizeFactor
 }
 
 // SetAnimationDuration sets the animation duration of the transition.

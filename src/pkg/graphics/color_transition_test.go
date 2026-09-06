@@ -21,7 +21,7 @@ test:
 	for {
 		select {
 		case <-ticker.C:
-			transition.Interpolate()
+			transition.Interpolate(1)
 			t.Logf("CurrentGradient: %v", transition.Gradient())
 
 		case <-timer.C:
@@ -29,7 +29,7 @@ test:
 		}
 	}
 
-	transition.Interpolate()
+	transition.Interpolate(1)
 	if !transition.Gradient().Equal(Catalogue().Crimson()) {
 		t.Errorf("CurrentGradient: got %v, want %v", transition.Gradient(), Catalogue().Crimson())
 	}

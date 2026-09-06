@@ -69,6 +69,9 @@ type config struct {
 
 	Effect struct {
 		BlastDuration time.Duration
+		WreckBlasts   int
+		WreckDuration time.Duration
+		WreckScale    float64
 	}
 
 	Enemy struct {

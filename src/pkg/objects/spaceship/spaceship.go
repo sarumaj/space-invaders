@@ -222,7 +222,9 @@ func (spaceship *Spaceship) Discovered() []string {
 // If the control to draw the spaceship experience bar is enabled, the spaceship is drawn with the experience bar.
 // If the control to draw the spaceship discovery progress bar is enabled, the spaceship is drawn with the discovery progress bar.
 // If the control to draw the spaceship shield is enabled, the spaceship is drawn with the shield.
-func (spaceship *Spaceship) Draw() {
+// The scale is how far the frame advanced the simulation, expressed in nominal
+// frames; it paces the colour and size transitions.
+func (spaceship *Spaceship) Draw(scale numeric.Number) {
 	var label string
 	if config.Config.Control.DrawObjectLabels.Get() {
 		label = spaceship.Commandant
@@ -246,8 +248,8 @@ func (spaceship *Spaceship) Draw() {
 		statusColors = append(statusColors, "rgba(0, 0, 240, 0.8)") // Blue
 	}
 
-	spaceship.Color.Interpolate()
-	spaceship.Geometry.Interpolate()
+	spaceship.Color.Interpolate(scale)
+	spaceship.Geometry.Interpolate(scale)
 	config.DrawSpaceship(
 		spaceship.Geometry.Position().Pack(),
 		spaceship.Geometry.Size().Pack(),
@@ -427,53 +429,62 @@ func (spaceship *Spaceship) MoveRight(scale numeric.Number) { spaceship.Move(Rig
 // If the spaceship's position is less than 0, it is set to 0.
 func (spaceship *Spaceship) MoveUp(scale numeric.Number) { spaceship.Move(Up, scale) }
 
-// MoveTo moves the spaceship to the specified position.
-// The spaceship's position is updated based on the delta.
-// If the spaceship's position is less than 0, it is set to 0.
-// If the spaceship's position is greater than the canvas width,
-// it is set to the canvas width.
-// If the spaceship's position is less than 0, it is set to 0.
-// If the spaceship's position is greater than the canvas height,
-// it is set to the canvas height.
+// MoveTo flies the spaceship towards the specified position, which is where the
+// mouse or the finger steering it currently is.
+// The scale is how far the frame advances the simulation, expressed in nominal
+// frames, exactly as for Move: the pointer and the movement keys share one speed
+// budget, so that neither is the faster way to play.
 func (spaceship *Spaceship) MoveTo(target numeric.Position, scale numeric.Number) {
 	if spaceship.ifFrozen() {
 		return
 	}
-
-	// Accelerate the spaceship
-	spaceship.Speed = spaceship.Speed.AddN(spaceship.Level.AccelerateRate * scale)
-	spaceship.thrusting = true
 
 	// Keep the spaceship clear of the pointer that is steering it. On a touch
 	// screen the finger sits exactly where the spaceship is asked to go, so
 	// without the offset the player's own hand covers the thing being aimed.
 	target = target.Sub(numeric.Locate(0, spaceship.Geometry.Size().Height*numeric.Number(config.Config.Spaceship.PointerOffsetFactor)))
 
-	// Limit the speed of the spaceship
-	if spaceship.Speed.Magnitude().Float() > config.Config.Spaceship.MaximumSpeed {
-		spaceship.Speed = spaceship.Speed.Normalize().Mul(numeric.Number(config.Config.Spaceship.MaximumSpeed))
+	// The heading is what the pointer is asking for; the distance is how much of
+	// it is left to cover.
+	remaining := target.Sub(spaceship.Geometry.Position())
+	distance := remaining.Magnitude()
+	heading := remaining.Normalize()
+	if heading.IsZero() {
+		return
 	}
 
-	// Calculate the delta
-	delta := spaceship.Geometry.Position().Sub(target).Normalize()
+	// Brake against the axes the pointer has just reversed, before the heading of
+	// this frame overwrites the one that is being braked against.
+	spaceship.Speed = spaceship.Speed.MulX(spaceship.Directions.Brake(heading))
+	spaceship.Directions.SetFromDelta(heading)
 
-	// Brake the spaceship if it is moving in an opposite direction
-	spaceship.Speed = spaceship.Speed.MulX(spaceship.Directions.Brake(delta))
+	// Accelerate along the heading by the same amount per frame the movement keys
+	// add along their axis. Adding it to both components, as this did, gave the
+	// pointer a factor of sqrt(2) more acceleration than the keyboard for the
+	// same configured rate.
+	speed := (spaceship.Speed.Magnitude() + spaceship.Level.AccelerateRate*scale).
+		Min(numeric.Number(config.Config.Spaceship.MaximumSpeed))
 
-	// Multiply the delta by the speed
-	delta = delta.Mul(spaceship.Speed.Magnitude())
+	// Speed is carried as a magnitude per axis, with the sign living in
+	// Directions, so that a frame mixing pointer and key input reads one
+	// representation.
+	spaceship.Speed = numeric.Locate(heading.X.Abs()*speed, heading.Y.Abs()*speed)
+	spaceship.thrusting = true
 
-	// Set the new directions based on the delta
-	spaceship.Directions.SetFromDelta(delta)
-
+	step := speed * scale
 	if spaceship.state == Hijacked {
 		spaceship.Directions.Horizontal = spaceship.Directions.Horizontal.Opposite()
 		spaceship.Directions.Vertical = spaceship.Directions.Vertical.Opposite()
-		delta = delta.Mul(-1)
+		heading = heading.Mul(-1)
+
+	} else if step > distance {
+		// Do not overshoot the pointer. Stepping past it and turning round on the
+		// next frame is what made the spaceship shiver under a finger holding
+		// still, and the shiver grew with the frame rate.
+		step = distance
 	}
 
-	// Update the spaceship position
-	spaceship.Geometry.SetPosition(spaceship.Geometry.Position().Sub(delta.Mul(scale)))
+	spaceship.Geometry.SetPosition(spaceship.Geometry.Position().Add(heading.Mul(step)))
 
 	// Fix the spaceship position
 	spaceship.FixPosition()

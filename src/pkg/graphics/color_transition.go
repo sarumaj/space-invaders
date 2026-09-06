@@ -22,18 +22,44 @@ func (t *ColorTransition) Gradient() Color {
 	return t.currentGradient
 }
 
-// Interpolate interpolates the transition.
-// It performs one transition step from the current color to the target color.
-func (t *ColorTransition) Interpolate() {
+// Interpolate advances the transition by one frame.
+// The scale is how far the frame advanced the simulation, expressed in nominal
+// frames, so that the transition takes its configured duration in wall-clock
+// time whatever the display refresh rate happens to be. Stepping by a fixed
+// amount per call, as this did, ran every colour animation 2.4 times too fast on
+// a 144 Hz display.
+func (t *ColorTransition) Interpolate(scale numeric.Number) {
+	if t.currentGradient.Equal(t.targetColor) {
+		// The callback fires once and is then dropped. Left in place it was
+		// re-entered on every later frame, and a callback that sets a colour would
+		// keep overwriting whatever was set after it.
+		if end := t.transitionEnd; end != nil {
+			t.transitionEnd = nil
+			end(t)
+		}
+
+		return
+	}
+
 	numberOfFrames := numeric.Number(config.Config.Control.DesiredFramesPerSecondRate) *
 		numeric.Number(t.animationDuration.Seconds())
 
-	if !t.currentGradient.Equal(t.targetColor) {
-		for i := 0; i < 4; i++ {
-			t.currentGradient[i] += (t.targetColor[i] - t.currentColor[i]) / numberOfFrames
+	if numberOfFrames <= 0 { // Nothing to animate over: arrive at once.
+		t.currentGradient = t.targetColor
+		return
+	}
+
+	for i := range t.currentGradient {
+		step := (t.targetColor[i] - t.currentColor[i]) / numberOfFrames * scale
+
+		// Land on the target rather than past it: a fractional frame scale would
+		// otherwise overshoot, and the equality above would never hold again.
+		if remaining := t.targetColor[i] - t.currentGradient[i]; step.Abs() >= remaining.Abs() {
+			t.currentGradient[i] = t.targetColor[i]
+			continue
 		}
-	} else if t.transitionEnd != nil {
-		t.transitionEnd(t)
+
+		t.currentGradient[i] += step
 	}
 }
 

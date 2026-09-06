@@ -7,13 +7,12 @@ import (
 
 // Star represents a star.
 type Star struct {
-	InnerRadius  numeric.Number
-	Position     numeric.Position
-	Radius       numeric.Number
-	CurrentScale numeric.Position
-	Spikes       numeric.Number
-	Exhausted    bool
-	color        string
+	InnerRadius numeric.Number
+	Position    numeric.Position
+	Radius      numeric.Number
+	Spikes      numeric.Number
+	Exhausted   bool
+	color       string
 }
 
 // Draw is a method that draws the star.
@@ -40,10 +39,9 @@ func (star *Star) Exhaust() {
 // Twinkle is a function that creates a new star.
 func Twinkle(position numeric.Position) *Star {
 	star := Star{
-		Position:     position,
-		Radius:       numeric.RandomRange(config.Config.Star.MinimumRadius, config.Config.Star.MaximumRadius),
-		Spikes:       numeric.RandomRange(config.Config.Star.MinimumSpikes, config.Config.Star.MaximumSpikes),
-		CurrentScale: numeric.Ones(),
+		Position: position,
+		Radius:   numeric.RandomRange(config.Config.Star.MinimumRadius, config.Config.Star.MaximumRadius),
+		Spikes:   numeric.RandomRange(config.Config.Star.MinimumSpikes, config.Config.Star.MaximumSpikes),
 		color: [...]string{
 			"White",
 			"LightYellow",

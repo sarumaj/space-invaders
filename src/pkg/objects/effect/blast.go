@@ -1,6 +1,8 @@
 package effect
 
 import (
+	"time"
+
 	"github.com/sarumaj/edu-space-invaders/src/pkg/config"
 	"github.com/sarumaj/edu-space-invaders/src/pkg/numeric"
 )
@@ -32,15 +34,23 @@ func (blast Blast) Spent() bool { return blast.Progress() >= 1 }
 // Blasts is a collection of destruction animations.
 type Blasts []Blast
 
-// Detonate starts a new blast.
+// Detonate starts a new blast that runs for the configured blast duration.
 func (blasts *Blasts) Detonate(position numeric.Position, radius numeric.Number, style, color string) {
+	blasts.DetonateFor(position, radius, style, color, config.Config.Effect.BlastDuration)
+}
+
+// DetonateFor starts a new blast that runs for the given duration.
+// A kill has to resolve before the next one happens, so the default is short;
+// the spaceship's own destruction has the screen to itself and is meant to be
+// watched, so it asks for longer.
+func (blasts *Blasts) DetonateFor(position numeric.Position, radius numeric.Number, style, color string, duration time.Duration) {
 	*blasts = append(*blasts, Blast{
 		Position: position,
 		Radius:   radius,
 		Style:    style,
 		Color:    color,
 		Seed:     numeric.RandomRange(0, 6.28),
-		life: numeric.Number(config.Config.Effect.BlastDuration.Seconds() *
+		life: numeric.Number(duration.Seconds() *
 			config.Config.Control.DesiredFramesPerSecondRate),
 	})
 }
