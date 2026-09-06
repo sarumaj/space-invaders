@@ -118,44 +118,68 @@ func (h *handler) registerEventHandlers() {
 			return nil
 		}))
 
-		if config.IsTouchDevice() {
-			globalTouchEvent := &touchEvent{mutex: &sync.Mutex{}}
-			config.GlobalSet("touchstart", globalTouchEvent.touchStart(h.touchEvent))
-			config.GlobalSet("touchmove", globalTouchEvent.touchMove(h.touchEvent))
-			config.GlobalSet("touchend", globalTouchEvent.touchEnd(h.touchEvent))
-			config.AddEventListenerToCanvas("touchstart", config.GlobalGet("touchstart"))
-			config.AddEventListenerToCanvas("touchmove", config.GlobalGet("touchmove"))
-			config.AddEventListenerToCanvas("touchend", config.GlobalGet("touchend"))
+		// Every input method is registered on every device. Gating touch against
+		// keyboard and mouse left a laptop with a touch screen — which reports a
+		// non-zero maxTouchPoints, so it took the touch branch — with no keyboard
+		// and no mouse at all, and a tablet with a keyboard attached with no keys.
+		// The three now coexist, and a player may switch between them mid-game.
+		globalTouchEvent := &touchEvent{mutex: &sync.Mutex{}}
+		config.GlobalSet("touchstart", globalTouchEvent.touchStart(h.touchEvent))
+		config.GlobalSet("touchmove", globalTouchEvent.touchMove(h.touchEvent))
+		config.GlobalSet("touchend", globalTouchEvent.touchEnd(h.touchEvent))
+		config.AddEventListenerToCanvas("touchstart", config.GlobalGet("touchstart"))
+		config.AddEventListenerToCanvas("touchmove", config.GlobalGet("touchmove"))
+		config.AddEventListenerToCanvas("touchend", config.GlobalGet("touchend"))
+		// A gesture the system takes over — an incoming call, a palm on the
+		// screen, the browser claiming it for a scroll — ends with touchcancel and
+		// no touchend, which used to leave the spaceship firing on a finger that
+		// was no longer there.
+		config.AddEventListenerToCanvas("touchcancel", config.GlobalGet("touchend"))
 
-		} else {
-			globalKeyMap := registeredKeys{
-				ArrowDown:  true,
-				ArrowLeft:  true,
-				ArrowRight: true,
-				ArrowUp:    true,
-				Escape:     true,
-				KeyA:       true,
-				KeyD:       true,
-				KeyP:       true,
-				KeyS:       true,
-				KeyW:       true,
-				Pause:      true,
-				Space:      true,
-			}
-			config.GlobalSet("keydown", globalKeyMap.keyDown(h.keyEvent))
-			config.GlobalSet("keyup", globalKeyMap.keyUp(h.keyEvent))
-			config.AddEventListener("keydown", config.GlobalGet("keydown"))
-			config.AddEventListener("keyup", config.GlobalGet("keyup"))
-
-			globalMouseEvent := &mouseEvent{mutex: &sync.Mutex{}}
-			config.GlobalSet("mousedown", globalMouseEvent.mouseDown(h.mouseEvent))
-			config.GlobalSet("mousemove", globalMouseEvent.mouseMove(h.mouseEvent))
-			config.GlobalSet("mouseup", globalMouseEvent.mouseUp(h.mouseEvent))
-			config.AddEventListenerToCanvas("contextmenu", config.GlobalGet("mousedown"))
-			config.AddEventListenerToCanvas("mousedown", config.GlobalGet("mousedown"))
-			config.AddEventListenerToCanvas("mousemove", config.GlobalGet("mousemove"))
-			config.AddEventListenerToCanvas("mouseup", config.GlobalGet("mouseup"))
+		globalKeyMap := registeredKeys{
+			ArrowDown:  true,
+			ArrowLeft:  true,
+			ArrowRight: true,
+			ArrowUp:    true,
+			Escape:     true,
+			KeyA:       true,
+			KeyD:       true,
+			KeyP:       true,
+			KeyS:       true,
+			KeyW:       true,
+			Pause:      true,
+			Space:      true,
 		}
+		config.GlobalSet("keydown", globalKeyMap.keyDown(h.keyEvent))
+		config.GlobalSet("keyup", globalKeyMap.keyUp(h.keyEvent))
+		config.AddEventListener("keydown", config.GlobalGet("keydown"))
+		config.AddEventListener("keyup", config.GlobalGet("keyup"))
+
+		globalMouseEvent := &mouseEvent{mutex: &sync.Mutex{}}
+		config.GlobalSet("mousedown", globalMouseEvent.mouseDown(h.mouseEvent))
+		config.GlobalSet("mousemove", globalMouseEvent.mouseMove(h.mouseEvent))
+		config.GlobalSet("mouseup", globalMouseEvent.mouseUp(h.mouseEvent))
+		config.AddEventListenerToCanvas("contextmenu", config.GlobalGet("mousedown"))
+		config.AddEventListenerToCanvas("mousedown", config.GlobalGet("mousedown"))
+		config.AddEventListenerToCanvas("mousemove", config.GlobalGet("mousemove"))
+		config.AddEventListenerToCanvas("mouseup", config.GlobalGet("mouseup"))
+		// Releasing the button outside the canvas delivers no mouseup to it, so
+		// the drag has to be ended when the pointer leaves instead.
+		config.AddEventListenerToCanvas("mouseleave", config.GlobalGet("mouseup"))
+
+		// The browser stops delivering key and pointer events the moment the page
+		// loses focus, and never sends the matching release. Alt-tabbing with the
+		// fire key down used to come back to a spaceship still firing.
+		config.GlobalSet("release", js.FuncOf(func(_ js.Value, _ []js.Value) any {
+			select {
+			case h.releaseEvent <- struct{}{}:
+			default: // A release is already queued; one is enough.
+			}
+
+			return nil
+		}))
+		config.AddEventListenerToWindow("blur", config.GlobalGet("release"))
+		config.AddEventListener("visibilitychange", config.GlobalGet("release"))
 	})
 }
 
@@ -223,7 +247,7 @@ func (event *mouseEvent) mouseDown(rcv chan<- mouseEvent) js.Func {
 // mouseMove is a method that listens to the mousemove event.
 func (event *mouseEvent) mouseMove(rcv chan<- mouseEvent) js.Func {
 	return js.FuncOf(func(_ js.Value, p []js.Value) any {
-		if !event.Pressed {
+		if !event.IsPressed() {
 			return nil
 		}
 
@@ -236,19 +260,21 @@ func (event *mouseEvent) mouseMove(rcv chan<- mouseEvent) js.Func {
 			}).
 			SetType(MouseEventTypeMove)
 
-		// Check which buttons are pressed
-		switch buttons, btnType := p[0].Get("buttons").Int(), mouseButton(p[0].Get("button").Int()); {
-		case buttons&1 != 0 && btnType == MouseButtonPrimary:
+		// Only the bitmask of buttons currently down is meaningful here: on a move
+		// event `button` reports whichever button last changed state, not what is
+		// being held, so pairing the two dropped drags that were perfectly valid.
+		switch buttons := p[0].Get("buttons").Int(); {
+		case buttons&1 != 0:
 			_ = event.SetPressed(true).SetButton(MouseButtonPrimary)
 
-		case buttons&2 != 0 && btnType == MouseButtonSecondary:
+		case buttons&2 != 0:
 			_ = event.SetPressed(true).SetButton(MouseButtonSecondary)
 
-		case buttons&4 != 0 && btnType == MouseButtonAuxiliary:
+		case buttons&4 != 0:
 			_ = event.SetPressed(true).SetButton(MouseButtonAuxiliary)
 
 		default:
-			_ = event.SetPressed(false).SetButton(btnType) // No buttons pressed
+			_ = event.SetPressed(false) // No buttons pressed
 		}
 
 		event.Send(rcv)
@@ -288,7 +314,7 @@ func (event *touchEvent) touchEnd(rcv chan<- touchEvent) js.Func {
 				Y: numeric.Number(changedTouches.Index(0).Get("clientY").Float() - canvasDimensions.BoxTop),
 			}).
 			SetEndTime(time.Now()).
-			SetMultiTap(changedTouches.Length() > 1).
+			SetMultiTap(multiTouch(p[0])).
 			SetType(TouchTypeEnd).
 			Send(rcv)
 
@@ -307,7 +333,7 @@ func (event *touchEvent) touchMove(rcv chan<- touchEvent) js.Func {
 				X: numeric.Number(changedTouches.Index(0).Get("clientX").Float() - canvasDimensions.BoxLeft),
 				Y: numeric.Number(changedTouches.Index(0).Get("clientY").Float() - canvasDimensions.BoxTop),
 			}).
-			SetMultiTap(changedTouches.Length() > 1).
+			SetMultiTap(multiTouch(p[0])).
 			SetType(TouchTypeMove).
 			Send(rcv)
 
@@ -328,10 +354,21 @@ func (event *touchEvent) touchStart(rcv chan<- touchEvent) js.Func {
 				Y: numeric.Number(changedTouches.Index(0).Get("clientY").Float() - canvasDimensions.BoxTop),
 			}).
 			SetStartTime(time.Now()).
-			SetMultiTap(changedTouches.Length() > 1).
+			SetMultiTap(multiTouch(p[0])).
 			SetType(TouchTypeStart).
 			Send(rcv)
 
 		return nil
 	})
+}
+
+// multiTouch reports whether more than one finger is on the screen.
+// The count has to come from the event's touches rather than its changedTouches:
+// changedTouches carries only the fingers that moved or landed in this event, so
+// putting two fingers down — which never happens in the same instant — reported
+// one touch twice, and the two-finger tap that is meant to pause never fired.
+func multiTouch(event js.Value) bool {
+	touches := event.Get("touches")
+
+	return touches.Truthy() && touches.Length() > 1
 }

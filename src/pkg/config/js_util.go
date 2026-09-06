@@ -23,6 +23,13 @@ func AddEventListenerToCanvas(event string, listener any) {
 	canvasObject.Call("addEventListener", event, listener)
 }
 
+// AddEventListenerToWindow is a function that adds an event listener to the window.
+// The document never sees the window's own focus events, so anything that has to
+// react to the page losing focus has to be registered here.
+func AddEventListenerToWindow(event string, listener any) {
+	window.Call("addEventListener", event, listener)
+}
+
 // CanvasBoundingBox returns the bounding box of the document.
 // getBoundingClientRect forces the browser to flush pending layout, and the
 // result is read once per enemy, bullet and input event, so it is cached until

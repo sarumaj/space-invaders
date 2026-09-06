@@ -24,11 +24,14 @@ type SpaceshipLevel struct {
 // It returns true if the spaceship level has decreased or if the shield has been used.
 func (lvl *SpaceshipLevel) Down() bool {
 	switch {
-	case lvl.Shield.Use():
-		return true
-
+	// God mode is checked before the shield, not after it: draining a shield that
+	// protects nothing left the player watching the damage bar fill up while
+	// invulnerable.
 	case config.Config.Control.GodMode.Get():
 		return false
+
+	case lvl.Shield.Use():
+		return true
 
 	case lvl.Progress == 0:
 		return false

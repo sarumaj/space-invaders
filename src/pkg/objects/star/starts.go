@@ -20,30 +20,42 @@ func (stars Stars) Twinkling() bool {
 	return false
 }
 
-// Explode is a function that creates a number of stars.
-// It creates a grid of cells and places stars in random positions within these cells.
-// The number of stars is determined by the input parameter.
+// Explode creates the given number of stars, one to a cell of a grid laid over
+// the canvas, each placed at random within its cell.
+//
+// The grid used to be built from a square cell of the canvas area divided by the
+// star count, which overshot the canvas on both axes: cells ran past the right
+// and bottom edges, so a share of the stars were placed outside the drawable
+// area and never seen, and the fill stopped part-way through the grid, leaving
+// the bottom of the sky emptier than the top. Sizing the grid to the count
+// instead keeps every star on the canvas and the coverage even.
 func Explode(num int) Stars {
-	// Define the grid size
+	if num <= 0 {
+		return nil
+	}
+
 	canvasDimensions := config.CanvasBoundingBox()
-	gridSize := (numeric.Number(canvasDimensions.OriginalWidth*canvasDimensions.OriginalHeight) / numeric.Number(num)).Root()
-	newBox := numeric.Locate(canvasDimensions.OriginalWidth, canvasDimensions.OriginalHeight).Div(gridSize).ToBox()
+	width := numeric.Number(canvasDimensions.OriginalWidth)
+	height := numeric.Number(canvasDimensions.OriginalHeight)
 
-	// Create a grid of cells and place stars in random positions within these cells
-	var stars Stars
-	for row := numeric.Number(0); row < newBox.Height; row++ {
-		for col := numeric.Number(0); col < newBox.Width; col++ {
-			if num <= 0 {
-				return stars
-			}
+	// Choose the column count that makes the cells as square as the canvas
+	// allows, then take as many rows as the count needs.
+	columns := (numeric.Number(num) * width / height).Root().Int()
+	if columns < 1 {
+		columns = 1
+	}
 
-			stars = append(stars, *Twinkle(numeric.Locate(
-				numeric.RandomRange(col, col+1),
-				numeric.RandomRange(row, row+1),
-			).Mul(numeric.Number(gridSize))))
+	rows := (num + columns - 1) / columns
+	cell := numeric.Locate(width/numeric.Number(columns), height/numeric.Number(rows))
 
-			num--
-		}
+	stars := make(Stars, 0, num)
+	for i := 0; i < num; i++ {
+		col, row := numeric.Number(i%columns), numeric.Number(i/columns)
+
+		stars = append(stars, *Twinkle(numeric.Locate(
+			numeric.RandomRange(col, col+1)*cell.X,
+			numeric.RandomRange(row, row+1)*cell.Y,
+		)))
 	}
 
 	return stars

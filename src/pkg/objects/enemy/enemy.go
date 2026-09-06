@@ -113,7 +113,9 @@ func (enemy *Enemy) Destroy() {
 // The color is based on the type of the enemy.
 // If the control to draw object labels is enabled, the name of the enemy is drawn.
 // If the control to draw enemy hitpoint bars is enabled, the hitpoint bar is drawn.
-func (enemy *Enemy) Draw() {
+// The scale is how far the frame advanced the simulation, expressed in nominal
+// frames; it paces the colour and size transitions.
+func (enemy *Enemy) Draw(scale numeric.Number) {
 	var label string
 	if config.Config.Control.DrawObjectLabels.Get() {
 		label = enemy.Name
@@ -126,8 +128,8 @@ func (enemy *Enemy) Draw() {
 		statusColors = append(statusColors, "rgba(240, 0, 0, 0.8)")
 	}
 
-	enemy.Color.Interpolate()
-	enemy.Geometry.Interpolate()
+	enemy.Color.Interpolate(scale)
+	enemy.Geometry.Interpolate(scale)
 
 	config.DrawEnemy(
 		enemy.Geometry.Position().Pack(),
@@ -142,10 +144,19 @@ func (enemy *Enemy) Draw() {
 }
 
 // Hit reduces the health points of the enemy.
-// The damage is reduced by the defense of the enemy.
+// The damage is reduced by the defense of the enemy, plus a roll of up to as much
+// again, so that the same shot is not always worth the same.
 // If the damage is less than 0, it is set to 0.
+//
+// The roll used to run to Defense*Progress. Defense already grows by
+// DefenseProgress on every level and by up to 4590 on the heavy types, so
+// multiplying the roll by the level again made the mitigation grow quadratically
+// against a bullet whose damage grows roughly linearly: past the middle of the
+// roster every shot rounded to zero damage, and a zero-damage shot is repelled
+// rather than absorbed, which reads as the enemy being invulnerable with no
+// explanation on screen.
 func (enemy *Enemy) Hit(damage int) int {
-	damage = damage - enemy.Level.Defense - numeric.RandomRange(0, enemy.Level.Defense*enemy.Level.Progress).Int()
+	damage = damage - enemy.Level.Defense - numeric.RandomRange(0, enemy.Level.Defense).Int()
 	damage = numeric.Number(damage).Clamp(0, numeric.Number(enemy.Level.HitPoints)).Int()
 
 	enemy.Level.HitPointsLoss += damage

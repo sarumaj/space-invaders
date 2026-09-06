@@ -1,7 +1,12 @@
+// Bump this whenever the pre-cached assets change: a new name makes the install
+// step populate a fresh cache, and the activate handler below drops the old one.
+// A single fixed name left every superseded asset on disk for good.
+const CACHE_NAME = "v1";
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
-      .open("v1")
+      .open(CACHE_NAME)
       .then((cache) => {
         // Pre-cache some static assets
         return cache.addAll([
@@ -33,6 +38,24 @@ self.addEventListener("install", (event) => {
   );
 });
 
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter((name) => name !== CACHE_NAME)
+            .map((name) => caches.delete(name)),
+        ),
+      )
+      .then(() => self.clients.claim())
+      .catch((error) => {
+        console.error("Failed to clean up old caches:", error);
+      }),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const isEnvRequest = event.request.url.includes("/.env");
   const isScoresRequest = event.request.url.includes("/scores.db");
@@ -60,8 +83,14 @@ self.addEventListener("fetch", (event) => {
                 return cachedResponse;
               }
 
-              // Update the cache with the new response
-              return caches.open("v1").then((cache) => {
+              // Update the cache with the new response. Only a successful
+              // same-origin response is worth storing: caching an error page or
+              // an opaque cross-origin response serves it back for good.
+              if (!networkResponse.ok || networkResponse.type === "opaque") {
+                return networkResponse;
+              }
+
+              return caches.open(CACHE_NAME).then((cache) => {
                 cache.put(event.request, networkResponse.clone());
                 return networkResponse;
               });
@@ -78,7 +107,11 @@ self.addEventListener("fetch", (event) => {
         // If no cached response, fetch from the network
         return fetch(event.request)
           .then((networkResponse) => {
-            return caches.open("v1").then((cache) => {
+            if (!networkResponse.ok || networkResponse.type === "opaque") {
+              return networkResponse;
+            }
+
+            return caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, networkResponse.clone());
               return networkResponse;
             });

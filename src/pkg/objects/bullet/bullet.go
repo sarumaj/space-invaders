@@ -27,7 +27,7 @@ func (bullet Bullet) Hostile() bool { return bullet.Heading > 0 }
 // Area returns the area of the bullet.
 func (bullet Bullet) Area() numeric.Number {
 	if config.Config.Control.CollisionDetectionVersion.Get() == 3 {
-		numeric.GetSkewedLineVertices(bullet.Position, bullet.Size, bullet.Skew).Vertices().Area()
+		return numeric.GetSkewedLineVertices(bullet.Position, bullet.Size, bullet.Skew).Vertices().Area()
 	}
 	return bullet.Size.Area()
 }

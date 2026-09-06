@@ -27,10 +27,26 @@ type handler struct {
 	mouseHeld    map[mouseButton]bool // mouseHeld is the map of mouse buttons held
 	once         sync.Once            // once is meant to register the keydown event only once
 	planet       *planet.Planet       // planet is the planet to be drawn
+	pointer      *numeric.Position    // pointer is where the mouse or the finger is steering the spaceship, if either is down
+	releaseEvent chan struct{}        // releaseEvent asks the loop to drop every held input, when the page loses focus
 	spaceship    *spaceship.Spaceship // spaceship is the player's spaceship
 	stars        star.Stars           // stars is the list of stars
 	touchEvent   chan touchEvent      // touchEvent is the channel for touch events
 	touchHeld    bool                 // touchHeld is the flag to indicate if the touch is held
+	wreckage     *wreckage            // wreckage is the spaceship's destruction sequence, set only once the game has been lost
+}
+
+// wreckage is the spaceship's destruction sequence. Losing used to stop the game
+// on the same frame the last level was taken, so the spaceship simply vanished
+// under the mission report; this keeps the game drawing for as long as the wreck
+// is still coming apart, and holds the report back until it has.
+type wreckage struct {
+	origin    numeric.Position // Centre of the hull that came apart.
+	radius    numeric.Number   // Radius of that hull.
+	color     string           // Colour the spaceship was wearing when it died.
+	epitaph   string           // Mission report, composed at the moment of death and shown once the fire goes out.
+	age, life numeric.Number   // How many nominal frames the sequence has run, and how many it runs for.
+	spawned   int              // Secondary explosions started so far.
 }
 
 // applyGravityOnEnemies applies gravity to the enemies.
@@ -132,15 +148,7 @@ func (h *handler) applyGravityOnSpaceship() {
 		area := h.spaceship.Area()
 		// Destroy the spaceship if it is too small.
 		if area <= 1 && !config.Config.Control.GodMode.Get() {
-			config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GameOver, config.Template{
-				"DiscoveredPlanets": h.spaceship.Discovered(),
-				"HighScore":         h.spaceship.Level.HighScore,
-				"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
-				"Reason":            config.Execute(config.Config.Planet.Impact.BlackHole.SpaceshipDestroyedReason),
-				"TopScores":         config.GetScores(10),
-			}), false, false)
-			h.pause()
-			h.cancel()
+			h.destroy(config.Execute(config.Config.Planet.Impact.BlackHole.SpaceshipDestroyedReason))
 			return
 		}
 
@@ -398,14 +406,7 @@ func (h *handler) checkCollisions() {
 				}
 
 				if h.spaceship.IsDestroyed() { // Check if the spaceship has been destroyed.
-					config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GameOver, config.Template{
-						"DiscoveredPlanets": h.spaceship.Discovered(),
-						"HighScore":         h.spaceship.Level.HighScore,
-						"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
-						"TopScores":         config.GetScores(10),
-					}), false, false)
-					h.pause()
-					h.cancel()
+					h.destroy("")
 					return
 				}
 
@@ -464,14 +465,7 @@ func (h *handler) checkCollisions() {
 
 			// Check if the spaceship has been destroyed.
 			if h.spaceship.IsDestroyed() {
-				config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GameOver, config.Template{
-					"DiscoveredPlanets": h.spaceship.Discovered(),
-					"HighScore":         h.spaceship.Level.HighScore,
-					"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
-					"TopScores":         config.GetScores(10),
-				}), false, false)
-				h.pause()
-				h.cancel()
+				h.destroy("")
 				return
 			}
 
@@ -529,8 +523,10 @@ func (h *handler) checkCollisions() {
 			}
 
 			// If the progress is a multiple of the enemy count progress step,
-			// generate a new enemy.
-			if h.spaceship.Level.Progress%config.Config.Enemy.CountProgressStep == 0 &&
+			// generate a new enemy. The check lives in the bullet loop, so it holds
+			// for every hit landed until the next level: the fleet is sized against
+			// the progress reached rather than the number of times it was noticed.
+			if wanted := config.Config.Enemy.Count + h.spaceship.Level.Progress/config.Config.Enemy.CountProgressStep; len(h.enemies) < wanted &&
 				len(h.enemies) < config.Config.Enemy.MaximumCount {
 
 				h.GenerateEnemy("", false)
@@ -567,12 +563,14 @@ func (h *handler) draw(scale numeric.Number) {
 	// Draw planet
 	h.planet.Draw()
 
-	// Draw spaceship
-	h.spaceship.Draw()
+	// Draw spaceship, unless it is the wreck that is being drawn instead.
+	if !h.dying() {
+		h.spaceship.Draw(scale)
+	}
 
 	// Draw enemies
-	for _, e := range h.enemies {
-		e.Draw()
+	for i := range h.enemies {
+		h.enemies[i].Draw(scale)
 	}
 
 	// Draw bullets
@@ -603,6 +601,10 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 		return
 
 	default:
+		if h.dying() { // Nothing the player does can steer a wreck.
+			return
+		}
+
 		bound := key.Key.Action()
 
 		if !key.Pressed {
@@ -627,44 +629,69 @@ func (h *handler) handleKeyEvent(key keyEvent) {
 	}
 }
 
-// handleKeyHold handles the key hold event.
-// It fires bullets when the space key is held.
-func (h *handler) handleKeyhold(scale numeric.Number) {
+// handleHeld applies everything that is currently held down, once per frame.
+// The three input methods share this one place on purpose. Holding a movement
+// key was applied here, per frame and scaled by the frame time, while dragging
+// the mouse or a finger was applied straight from the listener, once per input
+// event and unscaled — so the spaceship covered ground at the rate the device
+// happened to report at, and a 1000 Hz mouse outran the keyboard by more than an
+// order of magnitude. Firing was split the same way. Everything held now goes
+// through one frame-scaled path, which is what makes the three feel alike.
+func (h *handler) handleHeld(scale numeric.Number) {
 	select {
 	case <-h.ctx.Done():
 		return
 
 	default:
-		for _, held := range heldActions {
-			if !h.keysHeld[held] {
-				continue
-			}
+	}
 
-			switch held {
-			case actionMoveDown:
-				h.spaceship.MoveDown(scale)
+	switch {
+	case
+		h.dying(),           // A wreck takes no orders.
+		!running.Get(h.ctx): // Held input must not fly or fire the spaceship while the game is paused.
 
-			case actionMoveLeft:
-				h.spaceship.MoveLeft(scale)
+		return
+	}
 
-			case actionMoveRight:
-				h.spaceship.MoveRight(scale)
+	// Steer towards the pointer, if the mouse button or a finger is down.
+	if h.pointer != nil {
+		h.spaceship.MoveTo(*h.pointer, scale)
+	}
 
-			case actionMoveUp:
-				h.spaceship.MoveUp(scale)
-
-			case actionFire:
-				h.spaceship.Fire()
-
-			}
+	for _, held := range heldActions {
+		if !h.keysHeld[held] {
+			continue
 		}
+
+		switch held {
+		case actionMoveDown:
+			h.spaceship.MoveDown(scale)
+
+		case actionMoveLeft:
+			h.spaceship.MoveLeft(scale)
+
+		case actionMoveRight:
+			h.spaceship.MoveRight(scale)
+
+		case actionMoveUp:
+			h.spaceship.MoveUp(scale)
+
+		case actionFire:
+			h.spaceship.Fire()
+
+		}
+	}
+
+	// Holding the primary mouse button or a finger fires exactly as holding the
+	// fire key does; the cooldown in Fire is what limits all three.
+	if h.mouseHeld[MouseButtonPrimary] || h.touchHeld {
+		h.spaceship.Fire()
 	}
 }
 
 // handleMouse handles the mouse event.
 // It sets the running state to true when the mouse event is triggered.
-// It moves the spaceship to the left when the delta X is negative.
-// It moves the spaceship to the right when the delta X is positive.
+// It steers the spaceship towards the pointer while the primary button is down.
 // It pauses the game when the auxiliary or secondary button is pressed.
 func (h *handler) handleMouse(event mouseEvent) {
 	select {
@@ -672,8 +699,13 @@ func (h *handler) handleMouse(event mouseEvent) {
 		return
 
 	default:
+		if h.dying() { // Nothing the player does can steer a wreck.
+			return
+		}
+
 		if !event.Pressed { // If the mouse button is released, do nothing.
 			delete(h.mouseHeld, event.Button)
+			h.pointer = nil
 			return
 		}
 
@@ -695,106 +727,101 @@ func (h *handler) handleMouse(event mouseEvent) {
 
 		switch event.Type {
 		case MouseEventTypeDown:
+			// Aim at the press itself, so that pressing and holding without moving
+			// steers, exactly as holding a finger down does.
 			h.mouseHeld[event.Button] = true
+			h.aimAt(event.StartPosition, event.StartPosition)
 			return
 
 		case MouseEventTypeUp:
 			delete(h.mouseHeld, event.Button)
+			h.pointer = nil
 			return
 
 		}
 
 		// handling of mouse move event
 		h.mouseHeld[event.Button] = true // make sure the button is held (if button down event has been missed)
-		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition, 1)
-	}
-}
-
-// handleMouseHeld handles the mouse held event.
-// It fires bullets when the primary mouse button is held.
-func (h *handler) handleMouseHeld() {
-	select {
-	case <-h.ctx.Done():
-		return
-
-	default:
-		if h.mouseHeld[MouseButtonPrimary] {
-			h.spaceship.Fire()
-		}
+		h.aimAt(event.CurrentPosition, event.StartPosition)
 	}
 }
 
 // handleTouch handles the touch event.
 // It sets the running state to true when the touch event is triggered.
-// It moves the spaceship to the left when the delta X is negative.
-// It moves the spaceship to the right when the delta X is positive.
-// It pauses the game when the multi-tap event is triggered.
+// It steers the spaceship towards the finger while it is on the screen.
+// It pauses the game when two fingers are put down at once.
 func (h *handler) handleTouch(event touchEvent) {
 	select {
 	case <-h.ctx.Done():
 		return
 
 	default:
-		if h.start() { // If the game has just started, do nothing.
+		if h.dying() { // Nothing the player does can steer a wreck.
 			return
 		}
 
-		// If there are correlated touch events, pause the game.
-		if event.MultiTap {
-			h.pause()
+		if h.start() { // If the game has just started, do nothing.
 			return
 		}
 
 		switch event.Type {
 		case TouchTypeStart:
+			// Only a deliberate two-finger tap pauses. Testing MultiTap on every
+			// touch event meant a second finger brushing the screen mid-drag
+			// paused the game, and left the first finger registered as held.
+			if event.MultiTap {
+				h.pause()
+				return
+			}
+
 			h.touchHeld = true
+			h.aimAt(event.StartPosition, event.StartPosition)
 			return
 
 		case TouchTypeEnd:
 			h.touchHeld = false
+			h.pointer = nil
 			return
 
 		}
 
 		// handle touch move event
 		h.touchHeld = true // make sure the touch is held (if touch down event has been missed)
-		h.handleMoveEventTypes(event.CurrentPosition, event.StartPosition, 1)
+		h.aimAt(event.CurrentPosition, event.StartPosition)
 	}
 }
 
-// handleMoveEventTypes handles the move event types (mouse move event and touch move event).
-// It moves the spaceship to the position.
-// If the current position is not zero, it moves the spaceship to the current position.
-// If the start position is not zero, it moves the spaceship to the start position.
-// It corrects the position by the canvas dimensions.
-func (h *handler) handleMoveEventTypes(eventCurrentPosition, eventStartPosition numeric.Position, scale numeric.Number) {
+// aimAt records where the pointer wants the spaceship to be, correcting for the
+// canvas scale. The steering itself waits for the next frame, in handleHeld, so
+// that it is applied once per frame however often the device reports.
+func (h *handler) aimAt(eventCurrentPosition, eventStartPosition numeric.Position) {
 	canvasDimensions := config.CanvasBoundingBox()
 	positionCorrection := numeric.Locate(canvasDimensions.ScaleWidth, canvasDimensions.ScaleHeight)
 
+	var target numeric.Position
 	switch {
 	case !eventCurrentPosition.IsZero():
-		h.spaceship.MoveTo(eventCurrentPosition.DivX(positionCorrection), scale)
+		target = eventCurrentPosition.DivX(positionCorrection)
 
 	case !eventStartPosition.IsZero():
-		h.spaceship.MoveTo(eventStartPosition.DivX(positionCorrection), scale)
-
-	}
-}
-
-// handleTouchHeld handles the touch held event.
-// It fires bullets when the touch is held.
-func (h *handler) handleTouchHeld() {
-	select {
-	case <-h.ctx.Done():
-		return
+		target = eventStartPosition.DivX(positionCorrection)
 
 	default:
-		if !h.touchHeld {
-			return
-		}
-
-		h.spaceship.Fire()
+		return
 	}
+
+	h.pointer = &target
+}
+
+// releaseAll drops every held input. The browser stops delivering key and
+// pointer events as soon as the page loses focus or the system takes a gesture
+// over, and never sends the matching release, so without this the spaceship
+// flies and fires on input the player let go of long ago.
+func (h *handler) releaseAll() {
+	clear(h.keysHeld)
+	clear(h.mouseHeld)
+	h.touchHeld = false
+	h.pointer = nil
 }
 
 // pause pauses the game.
@@ -806,6 +833,11 @@ func (h *handler) pause() {
 	paused.Set(&h.ctx, true)     // signal that the game is paused
 	running.Set(&h.ctx, false)   // signal that the game is not running
 	suspended.Set(&h.ctx, false) // signal that the game is not suspended
+
+	// The gesture that paused is still physically held, and the one that resumes
+	// is consumed by start, so anything left held here would be applied to a
+	// spaceship the player is not looking at.
+	h.releaseAll()
 
 	config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GamePaused), false, false)
 }
@@ -891,6 +923,102 @@ func (h *handler) refresh(scale numeric.Number) {
 	h.blasts.Update(scale)
 }
 
+// dying reports whether the spaceship's destruction sequence is playing out.
+func (h *handler) dying() bool { return h.wreckage != nil }
+
+// destroy ends the game. The mission report is composed here, so that the score
+// is recorded at the moment of death, but it is held back until the spaceship has
+// finished coming apart: showing it on the same frame the last level was taken
+// left the player reading a scoreboard over a spaceship that had simply vanished.
+// The reason, when there is one, says what killed the spaceship.
+func (h *handler) destroy(reason string) {
+	if h.dying() { // The spaceship only dies once.
+		return
+	}
+
+	h.releaseAll()
+
+	report := config.Template{
+		"DiscoveredPlanets": h.spaceship.Discovered(),
+		"HighScore":         h.spaceship.Level.HighScore,
+		"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
+		"TopScores":         config.GetScores(10),
+	}
+
+	// The template falls back to a generic epitaph on a missing reason, and an
+	// empty string is not missing enough for it.
+	if reason != "" {
+		report["Reason"] = reason
+	}
+
+	size := h.spaceship.Geometry.Size()
+	h.wreckage = &wreckage{
+		origin:  h.spaceship.Geometry.Position().Add(size.Half().ToVector()),
+		radius:  size.ToVector().Magnitude() / 2,
+		color:   h.spaceship.Color.Gradient().FormatRGBA(),
+		epitaph: config.Execute(config.Config.MessageBox.Messages.GameOver, report),
+		life: numeric.Number(config.Config.Effect.WreckDuration.Seconds() *
+			config.Config.Control.DesiredFramesPerSecondRate),
+	}
+
+	// The hull goes first and large, over the whole sequence; the secondary
+	// explosions follow in mourn.
+	h.blasts.DetonateFor(
+		h.wreckage.origin,
+		h.wreckage.radius*numeric.Number(config.Config.Effect.WreckScale),
+		config.BlastWreck,
+		h.wreckage.color,
+		config.Config.Effect.WreckDuration,
+	)
+
+	go config.PlayAudio("spaceship_crash.wav", false)
+	go config.StopAudio("theme_heroic.wav")
+}
+
+// mourn advances the destruction sequence by one frame and closes the game once
+// the wreck has burnt out. The world is held still while it plays: an enemy
+// gliding on through the explosion reads as the game having carried on without
+// the player.
+func (h *handler) mourn(scale numeric.Number) {
+	h.wreckage.age += scale
+
+	// Stagger the secondary explosions across the opening of the sequence, so the
+	// hull reads as coming apart piece by piece rather than in a single flash.
+	// They are all started early enough to burn out before the report arrives:
+	// cutting one off mid-animation is what would make the report feel abrupt.
+	const spawnWindow = 0.6 // Fraction of the sequence the secondaries are started within.
+	for count := config.Config.Effect.WreckBlasts; h.wreckage.spawned < count &&
+		h.wreckage.age*numeric.Number(count) >= h.wreckage.life*spawnWindow*numeric.Number(h.wreckage.spawned); h.wreckage.spawned++ {
+
+		h.blasts.Detonate(
+			h.wreckage.origin.Add(numeric.Locate(
+				numeric.RandomRange(-h.wreckage.radius, h.wreckage.radius),
+				numeric.RandomRange(-h.wreckage.radius, h.wreckage.radius),
+			)),
+			h.wreckage.radius*numeric.RandomRange(0.35, 0.8),
+			[...]string{config.BlastBurst, config.BlastShatter, config.BlastShockwave}[h.wreckage.spawned%3],
+			h.wreckage.color,
+		)
+	}
+
+	h.blasts.Update(scale)
+	h.draw(scale)
+
+	if h.wreckage.age < h.wreckage.life {
+		return
+	}
+
+	config.SendMessage(h.wreckage.epitaph, false, false)
+
+	// The state changes of a pause, without its message: the mission report has
+	// just gone out, and an invitation to take a break underneath it reads as
+	// noise. The loop that restarts the game explains how to play again.
+	paused.Set(&h.ctx, true)
+	running.Set(&h.ctx, false)
+	suspended.Set(&h.ctx, false)
+	h.cancel()
+}
+
 // collectBlasts starts a destruction animation for every enemy that died since
 // the last frame. Enemies are destroyed by collisions, by bullets and by the
 // black hole, so they are collected here rather than at each of those sites.
@@ -945,14 +1073,7 @@ func (h *handler) checkEnemyFire() {
 			}), false, true, config.Config.MessageBox.ChannelLogThrottling)
 
 		if h.spaceship.IsDestroyed() {
-			config.SendMessage(config.Execute(config.Config.MessageBox.Messages.GameOver, config.Template{
-				"DiscoveredPlanets": h.spaceship.Discovered(),
-				"HighScore":         h.spaceship.Level.HighScore,
-				"Rank":              config.SetScore(h.spaceship.Commandant, h.spaceship.Level.HighScore),
-				"TopScores":         config.GetScores(10),
-			}), false, false)
-			h.pause()
-			h.cancel()
+			h.destroy("")
 			return
 		}
 	}
@@ -1039,6 +1160,9 @@ func (h *handler) Loop() {
 		case event := <-h.touchEvent:
 			h.handleTouch(event)
 
+		case <-h.releaseEvent:
+			h.releaseAll()
+
 		}
 	}
 
@@ -1048,11 +1172,16 @@ func (h *handler) Loop() {
 			return
 
 		case scale := <-frame:
+			// Once the spaceship is lost the frame belongs to the wreck alone: the
+			// world stops advancing, and the loop ends when the fire goes out.
+			if h.dying() {
+				h.mourn(scale)
+				continue
+			}
+
 			h.refresh(scale)
 			h.render(scale)
-			h.handleKeyhold(scale)
-			h.handleMouseHeld()
-			h.handleTouchHeld()
+			h.handleHeld(scale)
 
 		case key := <-h.keyEvent:
 			h.handleKeyEvent(key)
@@ -1062,6 +1191,9 @@ func (h *handler) Loop() {
 
 		case event := <-h.touchEvent:
 			h.handleTouch(event)
+
+		case <-h.releaseEvent:
+			h.releaseAll()
 
 		}
 	}
@@ -1073,6 +1205,8 @@ func (h *handler) Restart() {
 	h.enemies = nil
 	h.enemyBullets = nil
 	h.blasts = nil
+	h.wreckage = nil
+	h.releaseAll()
 	h.stars = star.Explode(config.Config.Star.Count)
 	h.planet = planet.Reveal(true, true)
 	h.ctx, h.cancel = context.WithCancel(context.Background())
@@ -1090,9 +1224,13 @@ func New() *handler {
 		mouseHeld:  make(map[mouseButton]bool),
 		touchEvent: make(chan touchEvent),
 		touchHeld:  false,
-		planet:     planet.Reveal(true, true),
-		spaceship:  spaceship.Embark(""),
-		stars:      star.Explode(config.Config.Star.Count),
+		// Buffered, so that the listener can drop a release in without waiting for
+		// the loop: it runs on the JavaScript event loop, which the loop's own
+		// frames come from.
+		releaseEvent: make(chan struct{}, 1),
+		planet:       planet.Reveal(true, true),
+		spaceship:    spaceship.Embark(""),
+		stars:        star.Explode(config.Config.Star.Count),
 	}
 
 	h.ctx, h.cancel = context.WithCancel(context.Background())

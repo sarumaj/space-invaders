@@ -46,6 +46,16 @@ func (m mouseEvent) ClickDuration() time.Duration {
 	return duration
 }
 
+// IsPressed reports whether a button is down, under the lock that guards the
+// rest of the event. The listeners run on the JavaScript event loop while the
+// game loop reads the same event, so an unguarded read of the field is a race.
+func (m *mouseEvent) IsPressed() bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	return m.Pressed
+}
+
 // Send sends the mouse event to the specified channel.
 func (m mouseEvent) Send(rcv chan<- mouseEvent) {
 	rcv <- mouseEvent{
