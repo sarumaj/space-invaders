@@ -1,10 +1,10 @@
 module github.com/sarumaj/edu-space-invaders
 
-go 1.26.2
+go 1.26.10
 
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
-	github.com/gin-contrib/cors v1.7.9
+	github.com/gin-contrib/cors v1.7.10
 	github.com/gin-contrib/gzip v1.2.8
 	github.com/gin-contrib/zap v1.1.9
 	github.com/gin-gonic/gin v1.12.0
