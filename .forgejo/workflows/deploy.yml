@@ -2,6 +2,9 @@
 # scripts/github_to_forgejo.py (HomeLab); --move-ci rewrites it. Jobs needing
 # GitHub, macOS, Windows or secrets Forgejo lacks stay in the GitHub file.
 name: deploy_to_apps
+# A failed job mails whoever started the run. Renovate's bot has no mailbox: when its
+# branch fails, Renovate opens a pull request, which mails the repository's watchers.
+enable-email-notifications: true
 'on':
   push:
     tags:
