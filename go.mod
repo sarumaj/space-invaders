@@ -4,9 +4,9 @@ go 1.26.10
 
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
-	github.com/gin-contrib/cors v1.7.10
-	github.com/gin-contrib/gzip v1.2.9
-	github.com/gin-contrib/zap v1.1.10
+	github.com/gin-contrib/cors v1.7.11
+	github.com/gin-contrib/gzip v1.2.10
+	github.com/gin-contrib/zap v1.1.11
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	go.uber.org/zap v1.28.0
